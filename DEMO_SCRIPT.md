@@ -24,6 +24,9 @@ Browser full screen, 100% zoom, role = **Senior Management**.
 
 **After the run:** Demo ▾ → **Reset demo data** (the audit trail stays "tampered" and the clock stays advanced until you do).
 
+## Optional 20-second add-on (if you have time, swap with the Reports step)
+**Register complaint** → type *Sahyadri Govt Coll of Engg Poona*, choose *Public Grievance Cell*, category *Academic Quality*, paste a one-line description. Point at the **Live check** panel: it matched the misspelt name, lists what is already open at the institution, and shows **Potential Overlapping Cases** *before* you submit. Say: "New complaints get checked on the way in, not after the damage is done." Then open any case in an overlap and press **Escalate** to show **"Coordinate before acting"** (the guard). Remember to reset afterwards.
+
 ## Being honest about what is a prototype (say this once, near the end)
 > "This is a prototype on synthetic data. In production it would connect to the Bureau systems and the AICTE master through connectors, use AICTE single sign-on instead of this role switcher, and send real email and SMS. The matching, SLA and audit logic you saw is the real logic."
 
@@ -36,6 +39,8 @@ Browser full screen, 100% zoom, role = **Senior Management**.
 | Hindi complaints? | "English today. Future scope: multilingual embeddings (e.g. MuRIL/IndicBERT) on-premise." |
 | Scale? | "Candidates are only compared within one institution, so cost grows per institution, not across the whole database. SQLite here; PostgreSQL in production." |
 | Where do SLAs come from? | "Illustrative values in config (RB 30 days, PGRC 21 and so on); AICTE's prescribed timelines replace them." |
+| Where does the data come from? | "Officials register complaints in the form or bulk-import a CSV; both run through the same matching pipeline. Production adds live connectors to the Bureau systems and CPGRAMS." |
+| Does it stop duplicate action? | "It warns and logs: acting on an overlapping case needs an acknowledgement, and after a Coordination decision the follower Bureaus can't transfer or dispose, only the lead can." |
 | Email/SMS alerts? | "In-app today. Delivery is future scope (NIC SMTP / SMS gateway)." |
 
 ## If something goes wrong

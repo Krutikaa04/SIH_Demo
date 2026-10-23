@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Bell, BarChart3, Building2, FolderOpen, GitMerge, LayoutDashboard, FlaskConical, Search, Zap, RotateCcw, FastForward, ChevronDown, ShieldCheck, ShieldAlert, UserCog, Clock3 } from 'lucide-react'
+import { Bell, BarChart3, FilePlus2, Building2, FolderOpen, GitMerge, LayoutDashboard, FlaskConical, Search, Zap, RotateCcw, FastForward, ChevronDown, ShieldCheck, ShieldAlert, UserCog, Clock3 } from 'lucide-react'
 import { post, api, setRole, useApi, useRole } from './api'
 import { useToast } from './toast'
 import { ago, cx } from './ui'
@@ -8,6 +8,7 @@ import { ago, cx } from './ui'
 const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/cases', label: 'Cases', icon: FolderOpen },
+  { to: '/register', label: 'Register complaint', icon: FilePlus2 },
   { to: '/overlaps', label: 'Overlaps', icon: GitMerge, badge: 'overlaps' },
   { to: '/institutions', label: 'Institutions', icon: Building2 },
   { to: '/reports', label: 'Reports', icon: BarChart3 },

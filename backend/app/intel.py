@@ -41,7 +41,8 @@ class Registry:
 
     def __init__(self, conn):
         self.insts = []
-        for r in db.rows(conn, "SELECT aicte_id,name,city FROM institutions"):
+        self._rows = db.rows(conn, "SELECT aicte_id,name,city,region FROM institutions")
+        for r in self._rows:
             city = normalize_name(r["city"])
             full = normalize_name(r["name"])
             self.insts.append({"id": r["aicte_id"], "name": r["name"], "city": city, "full": full,
@@ -71,6 +72,29 @@ class Registry:
         if best >= 80:
             return {"institution_id": inst["id"], "method": "NAME_LOW", "confidence": float(best)}
         return None
+
+
+    GENERIC = {"government", "college", "institute", "institution", "technology", "engineering", "management",
+               "studies", "polytechnic", "school", "pharmacy", "university", "science", "sciences", "and"}
+
+    def suggest(self, name, n=5):
+        """Best fuzzy candidates for a name, for the user to confirm when resolution is not confident.
+
+        Generic words (college, institute, engineering...) are ignored when ranking, so only the distinctive part
+        of the name (e.g. 'Sahyadri', 'Kaveri', the city) can make a candidate look similar."""
+        norm = normalize_name(name)
+        if not norm:
+            return []
+        qd = " ".join(t for t in norm.split() if t not in self.GENERIC)
+        info = {r["aicte_id"]: r for r in self._rows}
+        scored = []
+        for i in self.insts:
+            idist = " ".join(t for t in i["full"].split() if t not in self.GENERIC)
+            sc = fuzz.token_set_ratio(qd, idist) if qd else 0
+            scored.append((max(sc, 0.7 * fuzz.WRatio(norm, i["full"])), i))
+        scored.sort(key=lambda x: -x[0])
+        return [{"institution_id": i["id"], "name": i["name"], "city": info[i["id"]]["city"],
+                 "region": info[i["id"]]["region"], "score": round(sc)} for sc, i in scored[:n] if sc >= 65]
 
 
 # ---------------------------------------------------------------- text --------------
@@ -283,6 +307,24 @@ def detect(conn, only_case=None, institutions=None):
                                 "case_b": b["case_id"], **res})
         recluster(conn, inst)
     return created
+
+
+def preview_pairs(conn, draft):
+    """Score a not-yet-saved case against the institution's eligible cases (no writes)."""
+    cases = load_cases(conn)
+    now_dt = db.now(conn)
+    group = [c for c in cases if c["institution_id"] == draft["institution_id"] and _eligible(c, now_dt)]
+    if not group:
+        return []
+    docs = {c["case_id"]: c["description"] for c in cases}
+    docs[draft["case_id"]] = draft["description"]
+    tm = TextModel(docs)
+    out = []
+    for c in group:
+        res = score_pair(draft, c, tm)
+        if res:
+            out.append({**res, "other": c})
+    return out
 
 
 def recluster(conn, institution_id):

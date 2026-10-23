@@ -7,7 +7,7 @@
 ## 0. TL;DR
 
 - **What:** a single-window dashboard for AICTE officials that shows every complaint across all Bureaus/Cells (RB, PGRC, AB, LC, VIG), finds **overlapping complaints about the same institution** even when names/IDs/descriptions differ, and lets Bureaus **coordinate**. Everything runs **offline** on one laptop with **no paid APIs**.
-- **State:** the planned scope (P0 + P1 + P2) is **built and rehearsed**. 17 automated tests and a full-flow smoke test pass. The demo is ready; what remains is polish/extension (see [§13](#13-not-built--known-limitations) and [§14](#14-suggested-backlog-for-the-team)).
+- **State:** the planned scope (P0 + P1 + P2) is **built and rehearsed**, plus two post-review additions: **complaint registration / CSV import** and a **coordination guard** (see §2). 23 automated tests and a full-flow smoke test pass. The demo is ready; what remains is polish/extension (see [§13](#13-not-built--known-limitations) and [§14](#14-suggested-backlog-for-the-team)).
 - **Run it:**
   ```bash
   pip install -r requirements.txt     # first time only (Python 3.11+, tested on 3.13)
@@ -35,6 +35,7 @@ Legend: ✅ built and tested · 🟡 built, simplified on purpose (LITE) · 🎭
 |---|---|---|---|
 | R1 | Centralized institution profile | ✅ | `pages/Institution.tsx`, `GET /api/institutions/{id}` |
 | R2 | Case tracking (all required fields) | ✅ | `pages/Cases.tsx`, `pages/CaseDetail.tsx`, `GET /api/cases` |
+| R2+ | **Register a complaint** (form with live institution match + overlap preview) and **bulk CSV import** | ✅ | `pages/Register.tsx`, `services.register_complaint()`, `POST /api/complaints*` |
 | R3 | Cross-Bureau overlap detection + linking | ✅ | `backend/app/intel.py`, `pages/Overlaps.tsx`, `pages/Room.tsx` |
 | R4 | Real-time dashboard | 🟡 SSE push + refresh, single process | `pages/Dashboard.tsx`, `events.py`, `GET /api/events` |
 | R5 | Workflow & action history (+ documents) | ✅ / 🟡 docs on local disk, no preview | `POST /api/cases/{id}/actions`, `extras.py` (documents) |
@@ -47,6 +48,7 @@ Legend: ✅ built and tested · 🟡 built, simplified on purpose (LITE) · 🎭
 |---|---|---|---|
 | A | Explainable overlap engine (score breakdown) | ✅ | 5 signals, "Why flagged" drawer |
 | B | Coordination Room | 🟡 | Link → lead Bureau → comments → decision (MERGE / RESOLVE / KEEP_SEPARATE). "Merge" is logical, not a physical record merge |
+| B+ | **Coordination guard** | ✅ | Acting on an overlapping case needs a logged acknowledgement; after a MERGE the non-lead Bureau is blocked from transfer/escalate/dispose (`services.coordination_guard`) |
 | C | Institution risk score | ✅ | `risk.py`; badge + breakdown on profile, list, dashboard |
 | D | Auto-escalation + SLA countdown | ✅ | `sla.py` engine (30 s tick), live `Countdown` component |
 | E | Natural-language search | 🟡 | Rule-based parser `nlsearch.py`; shows "I understood" chips |
@@ -78,7 +80,8 @@ Legend: ✅ built and tested · 🟡 built, simplified on purpose (LITE) · 🎭
 | Burst alerts | — | If one engine tick escalates >4 cases, it creates **one digest alert** instead of many | The +7-day time machine otherwise spawns dozens |
 | K-ideas | 3 extras | K1 time machine, K2 effort saved, K3 briefing (+ ping-pong). **K4 graph not built** | Time |
 | Reset | copy pristine DB file | **Re-seed** (`POST /api/admin/reset`), guarded by a lock | Dates are relative to "today", so a pristine file would go stale |
-| Added beyond plan | — | Overlap-page search box, demo-flow smoke test, 17 pytest tests, offline wheelhouse + bundle script, `start_demo.bat` | Rehearsal/robustness |
+| Registration & guard | not in the plan | Added after a gap review against the problem statement: there was no way to get data *in* except the seed/Simulate, and overlaps were informational only | Needed for a credible "single source of truth" and to "prevent conflicting or parallel actions" |
+| Added beyond plan | — | Overlap-page search box, demo-flow smoke test, 23 pytest tests, offline wheelhouse + bundle script, `start_demo.bat` | Rehearsal/robustness |
 
 ---
 
@@ -226,6 +229,22 @@ No login. The UI sends `X-Role` (`RB|PGRC|AB|LC|VIG|REGIONAL|SENIOR`) and `X-Reg
 ### 7.6 Tamper-evident history (`db.py`)
 `action_history` rows form a **per-case hash chain**: `hash = sha256(prev_hash + canonical JSON of [case_id, seq, ts, actor_id, actor_bureau, action_type, from, to, remarks])`, genesis = 64 zeros. `append_action()` is the **only** writer (the seed uses it too). `verify_chain(case_id=None)` recomputes and reports the first broken record. `POST /api/admin/tamper` does a raw `UPDATE` to demonstrate detection. Uploaded documents' SHA-256 is embedded in the history remark. *Tamper-evident, not tamper-proof* (someone with DB admin rights could recompute the chain).
 
+### 7.6b Registering complaints (`services.py`, `pages/Register.tsx`)
+Every new complaint — from the **Register form**, a **CSV import**, or the **Simulate** button — goes through one function, `services.register_complaint()`: validate (`clean_complaint`) → resolve the institution → duplicate check (same institution + Bureau + text while still open) → least-loaded desk officer → insert case → two history events → `intel.detect(only_case=…)` → overlap alerts → SSE push.
+- **Live check:** `POST /api/complaints/preview` (no writes) returns the resolved institution (+ method/confidence), up to 5 `suggestions` when the match is missing or low-confidence (ranking ignores generic words like "college/institute"), the institution's open cases, and the **potential overlaps with score breakdown** — so the official sees "Potential Overlapping Cases" *before* submitting.
+- **Unresolved names:** `register` returns `422 UNRESOLVED_INSTITUTION` with suggestions; the user picks the institution (method `MANUAL`) or searches the master list. There is still **no review queue** for unresolved rows (backlog).
+- **CSV import:** `POST /api/complaints/import {csv_text, dry_run}`; column aliases are accepted (`institution`, `complaint`, `date`…); max 500 rows; `dry_run:true` validates + previews every row (ready / needs review / error); the real run registers valid rows sequentially (so later rows can overlap with earlier ones) and sends one summary toast instead of one per row.
+- Bureau roles always register into **their own Bureau** (the bureau field is locked/ignored); Senior/Regional choose the Bureau.
+
+### 7.6c Coordination guard (`services.coordination_guard`, enforced in `main.case_action`)
+Applies to `transfer`, `escalate`, `dispose` only (remark / assign / documents are never blocked):
+| Situation | Level | Effect |
+|---|---|---|
+| Case is in an overlap cluster that is OPEN/LINKED (no decision yet) | `ack` (`OPEN_OVERLAP`) | `409 OVERLAP_ACK_REQUIRED` unless the request has `acknowledge_overlap:true`; the UI shows a warning with a link to the Coordination Room and a checkbox; the acknowledgement is **appended to the history remark** (`[Acted with open coordination issue OVL-…: acknowledged by …]`) |
+| Room decision = **MERGE** and this case's Bureau is **not the lead** | `block` (`FOLLOWS_LEAD`) | `403`; buttons greyed out; banner "Actions restricted". **Senior is exempt from the block** but must acknowledge |
+| MERGE and this case is the **lead's**, dispose while followers are still open | `ack` (`LEAD_WITH_OPEN_FOLLOWERS`, dispose only) | acknowledgement required |
+`GET /api/cases/{id}` returns `guard` (level, code, message, `applies_to`, room/lead/other Bureaus) and removes blocked actions from `allowed_actions`. RESOLVE / KEEP_SEPARATE decisions lift the guard.
+
 ### 7.7 Natural-language search (`nlsearch.parse`)
 Rule-based grammar → the same filter params the Cases page uses + a list of **chips** ("I understood…"). Understands: status (pending/open, disposed, under process, transferred, escalated, pending info), flags (overdue/beyond timeline, nearing, overlap), Bureau names/codes, region names (longest match first so "south-western" ≠ "western") and states, categories (keyword → canonical), ages ("older than 30 days/2 months", "last 2 weeks", "this month/year", "since March"), AICTE ID, case ID, institution (fuzzy), city, and leftover keywords. Unknown text falls back to keyword search.
 
@@ -264,7 +283,7 @@ Rule-based grammar → the same filter params the Cases page uses + a list of **
 | `GET /dashboard/summary` | totals, workload, top-risk institutions, trend, ageing, regions (heatmap), activity, overlap stats, effort saved, **briefing**, **desk** (bureau roles) |
 | `GET /cases?q&bureau&region&category&status&institution_id&date_from&date_to&overdue&overlap&nearing&age_gt&age_lt&sort&page&page_size` | filtered list (`status=Pending` = not disposed) |
 | `GET /cases/{id}` · `/cases/{id}/history` | detail (+`allowed_actions`, `sla`, `overlap`, `room`) · hash-chained history (+documents per event) |
-| `POST /cases/{id}/actions` `{type: remark\|assign\|transfer\|escalate\|dispose, remarks, to_bureau, officer_id, next_action}` | workflow action (permission-checked) |
+| `POST /cases/{id}/actions` `{type: remark\|assign\|transfer\|escalate\|dispose, remarks, to_bureau, officer_id, next_action, acknowledge_overlap}` | workflow action (permission- and coordination-guard-checked) |
 | `GET/POST /cases/{id}/documents` · `GET /documents/{id}/download` | list / upload (base64 JSON, ≤2 MB) / download; `verified` = file hash still matches |
 | `GET /institutions?q&region` · `GET /institutions/{aicte_id}` | list with risk; profile with cases, clusters, stats, risk breakdown |
 | `GET /overlaps?status=active\|all` · `GET /overlaps/{pair_id}` | clusters with pairs + breakdowns · one pair |
@@ -274,7 +293,8 @@ Rule-based grammar → the same filter params the Cases page uses + a list of **
 | `GET /reports/{bureau\|region\|institution\|ageing\|disposal\|overlaps\|periodic}?format=json\|csv&period=month\|quarter` | reports |
 | `GET /export/cases?<same filters>` | CSV export of the filtered case list |
 | `GET /audit/verify?case_id=` | verify the hash chain (all cases if omitted) |
-| `POST /simulate/complaint {scenario?:1..6}` | file a scripted complaint through the real pipeline |
+| `POST /complaints/preview` · `POST /complaints` · `POST /complaints/import` | register-form live check (no writes) · register one complaint (`422 UNRESOLVED_INSTITUTION` + suggestions) · bulk CSV import (`dry_run`) |
+| `POST /simulate/complaint {scenario?:1..6}` | file a scripted complaint through the real pipeline (uses `register_complaint`) |
 | `POST /admin/clock {add_days}` · `/admin/tamper` · `/admin/reset` | demo tools |
 | `GET /events` | SSE stream |
 Interactive docs: `http://127.0.0.1:8000/docs` (FastAPI Swagger) while the app runs.
@@ -283,7 +303,7 @@ Interactive docs: `http://127.0.0.1:8000/docs` (FastAPI Swagger) while the app r
 
 ## 10. Frontend guide
 
-- **Routes** (`main.tsx`): `/` Dashboard · `/cases` · `/cases/<case-id…>` (splat route because IDs have slashes) · `/overlaps` (`?open=OVL-xxxx` opens the Why-flagged drawer) · `/rooms/:id` · `/institutions` · `/institutions/:id` · `/reports` · `/alerts`.
+- **Routes** (`main.tsx`): `/` Dashboard · `/cases` · `/cases/<case-id…>` (splat route because IDs have slashes) · `/overlaps` (`?open=OVL-xxxx` opens the Why-flagged drawer) · `/rooms/:id` · `/institutions` · `/institutions/:id` · `/reports` · `/alerts` · `/register` (Register complaint: single form + bulk CSV).
 - **Data fetching:** `useApi(path)` (in `api.ts`) fetches and **auto-refreshes on SSE events and on role change**. It sets `data=null` on error so 403/404 show an `ErrorBox`. Use `post()`/`api()` for writes; `download()` for files (it sends the role headers; a plain `<a href>` can't).
 - **Role:** `useRole()` / `setRole()` (persisted in `localStorage`). The header dropdown calls `setRole`; every `api()` call adds the headers. UI greys out actions using the `allowed_actions` the server returns — **the server is the source of truth**.
 - **Shared UI** (`ui.tsx`): `BureauBadge`, `StatusChip`, `SlaChip`, `RiskBadge`, `ScoreRing`, `Card`, `Drawer`, `Countdown` (live SLA timer using server clock), formatters.
@@ -318,12 +338,13 @@ Interactive docs: `http://127.0.0.1:8000/docs` (FastAPI Swagger) while the app r
 ## 13. Not built / known limitations
 - **No authentication** (roles are header-based and server-enforced, but anyone can change the header). Production: AICTE SSO / e-Office, RBAC+ABAC, MFA.
 - **No email/SMS** — alerts are in-app only; "send reminder" isn't implemented at all (planned as a message preview/outbox mock).
-- **Data is synthetic**; no ingestion from CPGRAMS/Bureau systems; institution master is the seeded table.
+- **Data is synthetic**; officials can now register complaints and import CSVs, but there are still no live feeds from CPGRAMS/Bureau systems; the institution master is the seeded table.
 - **English only**; no Hindi/regional-language matching.
-- **No review queue** for complaints whose institution can't be resolved (resolver returns `None`; the live path falls back to the intended institution only for scripted simulate cases).
+- **No review queue** for complaints whose institution can't be resolved: the Register form asks the user to pick from suggestions, and CSV rows that don't match are reported as "needs review" and **skipped** (fix the CSV and re-upload). Nothing is parked for later.
 - **Weights are hand-set** (calibrated on the test pairs), not learned from feedback; no officer "was this right?" loop.
 - **SLA values are illustrative**; single SLA per Bureau (no per-category/statutory SLAs, no working-day/holiday calendar).
-- **Coordination "merge" is logical** — cases are linked under a lead Bureau; nothing syncs to systems of record.
+- **Coordination "merge" is logical** — cases are linked under a lead Bureau (and the guard restricts follower Bureaus), but nothing syncs to systems of record. A room can only be opened from a **detected** cluster: there is **no manual link/unlink** of arbitrary cases yet.
+- **Alerts are not role-targeted:** every role sees every alert (the Regional Office is filtered by region).
 - **PDF has no charts**; no custom report builder, saved filters, or scheduled reports.
 - **Documents:** local disk only, ≤2 MB, no inline preview, no e-signature.
 - **Heatmap is region-level** (no district drill-down). Region names (8) should be verified against AICTE's real regional-office structure.
@@ -344,9 +365,10 @@ Suggested split mirrors the original four tracks. Effort is a rough developer-ho
 - Move to PostgreSQL + a real job runner for the SLA tick (4–6 h, production scope).
 
 **Track B — Intelligence**
-- **Review queue for unresolved/ambiguous institution matches** + UI (3 h).
+- **Review queue for unresolved/ambiguous institution matches** (park the complaint, let an officer confirm later; reuse `Registry.suggest`) (3 h).
+- **Manual link/unlink of cases** and add/remove case in a Coordination Room (2 h).
+- **Role-targeted alerts** (RB sees alerts about RB cases and overlaps it is part of) (1 h).
 - **Officer feedback on overlaps** ("was this right?" thumbs) storing labels; script to re-tune weights/thresholds (3–4 h).
-- **CSV import page** that runs rows through the same resolve → score → alert pipeline (3 h) — also the best answer to "real data?".
 - Multilingual (Hindi) matching via on-prem embeddings, e.g. MuRIL/IndicBERT (research, 6+ h).
 - Add more labelled pairs + edge cases to `test_prototype.py` as the data grows.
 

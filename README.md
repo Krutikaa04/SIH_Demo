@@ -49,13 +49,15 @@ Run the backend in another terminal with `python run.py --no-browser`.
 - **Reports & analytics**: Bureau-wise, region-wise, institution-wise, ageing, disposal rate, overlaps and
   monthly/quarterly, each with CSV and PDF export; the case list also exports to CSV
 - **Supporting documents** on cases (upload/download, SHA-256 verified, recorded in the hash-chained history)
+- **Register complaint** (new page): live institution match and overlap preview while typing, plus bulk CSV import (validate first)
+- **Coordination guard**: acting on an overlapping case needs a logged acknowledgement; after a MERGE the follower Bureau cannot transfer/escalate/dispose
 - **Daily briefing** for Senior Management / Regional Offices and a "duplicate effort saved" estimate on the dashboard
 
 ## Rehearsal & safety net
 
 - `DEMO_SCRIPT.md` - the 3-minute script, honest-answer cheat sheet, and "if something goes wrong" table
 - `python scripts/smoke_test.py` - runs the whole demo flow twice plus a role sweep against the running app; must say ALL CHECKS PASSED (it leaves the data reset)
-- `python -m pytest backend/tests -q` - 17 regression tests (overlap engine incl. decoys, audit chain, SLA engine, NL parser, roles)
+- `python -m pytest backend/tests -q` - 23 regression tests (overlap engine incl. decoys, audit chain, SLA engine, NL parser, roles)
 - `start_demo.bat` - double-click launcher (installs from `vendor/wheels` offline if needed)
 - `powershell -ExecutionPolicy Bypass -File scripts\make_bundle.ps1` - builds `AICTE_ICMD_demo_bundle.zip` for a second laptop
 - Use `http://127.0.0.1:8000` (not `localhost`): on Windows `localhost` can add a ~2 s IPv6 delay per request

@@ -14,6 +14,7 @@ import Institutions from './pages/Institutions'
 import Institution from './pages/Institution'
 import Alerts from './pages/Alerts'
 import Reports from './pages/Reports'
+import Register from './pages/Register'
 
 startEvents()
 
@@ -32,6 +33,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="institutions/:id" element={<Institution />} />
             <Route path="alerts" element={<Alerts />} />
             <Route path="reports" element={<Reports />} />
+            <Route path="register" element={<Register />} />
           </Route>
         </Routes>
       </ToastProvider>

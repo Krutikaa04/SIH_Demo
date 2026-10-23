@@ -28,8 +28,12 @@ export async function api(path: string, init?: RequestInit): Promise<any> {
   if (!r.ok) {
     const t = await r.text()
     let msg = t
-    try { msg = JSON.parse(t).detail || t } catch {}
-    throw new Error(msg || r.statusText)
+    let detail: any = null
+    try { detail = JSON.parse(t).detail; msg = typeof detail === 'string' ? detail : (detail?.message || t) } catch {}
+    const err: any = new Error(msg || r.statusText)
+    err.status = r.status
+    err.detail = detail
+    throw err
   }
   return r.json()
 }

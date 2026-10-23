@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, ArrowRightLeft, Download, Paperclip, Upload, BadgeCheck, Bot, CheckCheck, FileText, GitMerge, Hash, Lock, MessageSquarePlus, ShieldAlert, ShieldCheck, TrendingUp, UserCheck, UserPlus, Users, Zap, Siren } from 'lucide-react'
-import { api, download, post, useApi } from '../api'
+import { api, download, post, useApi, useRole } from '../api'
 import { BureauBadge, Card, Countdown, Drawer, ErrorBox, Loading, SlaChip, StatusChip, cx, fmtDate, fmtTs } from '../ui'
 
 const ICONS: any = {
@@ -31,6 +31,8 @@ export default function CaseDetail() {
   const [act, setAct] = useState<string | null>(null)
   const [form, setForm] = useState<any>({})
   const [err, setErr] = useState('')
+  const [ack, setAck] = useState(false)
+  const me = useRole()
   if (loading && !c) return <Loading />
   if (error && !c) return <ErrorBox msg={error} />
   const ov = c.overlap
@@ -39,6 +41,7 @@ export default function CaseDetail() {
 
   async function verify() { setVer(await api(`/audit/verify?case_id=${enc}`)) }
   const allowed: string[] = c.allowed_actions || []
+  const needsAck = !!c.guard && !!act && c.guard.applies_to.includes(act) && (c.guard.level === 'ack' || (c.guard.level === 'block' && me.role === 'SENIOR'))
   const ACTIONS: any[] = [
     { k: 'remark', label: 'Add remark', icon: MessageSquarePlus, tone: 'border-slate-200 text-slate-700 hover:bg-slate-50' },
     { k: 'assign', label: 'Assign officer', icon: UserPlus, tone: 'border-slate-200 text-slate-700 hover:bg-slate-50' },
@@ -62,7 +65,7 @@ export default function CaseDetail() {
   async function submit() {
     setErr('')
     try {
-      await post(`/cases/${enc}/actions`, { type: act, ...form })
+      await post(`/cases/${enc}/actions`, { type: act, ...form, acknowledge_overlap: ack })
       setAct(null); setForm({})
     } catch (e: any) { setErr(e.message) }
   }
@@ -93,7 +96,7 @@ export default function CaseDetail() {
         {ACTIONS.map((a) => {
           const ok = allowed.includes(a.k)
           return (
-            <button key={a.k} disabled={!ok} onClick={() => { setAct(a.k); setForm({}); setErr('') }}
+            <button key={a.k} disabled={!ok} onClick={() => { setAct(a.k); setForm({}); setErr(''); setAck(false) }}
               className={cx('flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition', ok ? a.tone : 'cursor-not-allowed border-slate-100 text-slate-300')}>
               <a.icon size={15} /> {a.label}</button>)
         })}
@@ -113,6 +116,12 @@ export default function CaseDetail() {
       {c.room && <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-800">
         Linked in <Link className="font-semibold underline" to={`/rooms/${c.room.id}`}>{c.room.id}</Link> · lead Bureau <b>{c.room.lead_bureau}</b>
         {c.room.lead_bureau !== c.bureau && ` — this Bureau follows ${c.room.lead_bureau}'s lead`} · {c.room.status}</div>}
+      {c.guard && c.guard.level === 'block' && (
+        <div className="flex items-start gap-3 rounded-xl border border-indigo-300 bg-indigo-100/60 p-3.5 text-sm text-indigo-900">
+          <Lock size={17} className="mt-0.5 shrink-0" /><span><b>Actions restricted.</b> {c.guard.message} You can still add remarks, assign an officer and attach documents.</span></div>)}
+      {c.guard && c.guard.level === 'ack' && c.guard.code === 'LEAD_WITH_OPEN_FOLLOWERS' && (
+        <div className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 p-3.5 text-sm text-amber-900">
+          <Siren size={17} className="mt-0.5 shrink-0" /><span>{c.guard.message}</span></div>)}
 
       <div className="grid gap-5 lg:grid-cols-5">
         <div className="space-y-5 lg:col-span-2">
@@ -217,7 +226,18 @@ export default function CaseDetail() {
               <input value={form.next_action || ''} onChange={(e) => setForm({ ...form, next_action: e.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>)}
           {act === 'transfer' && c.transfer_count >= 2 && <div className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800">This case has already moved {c.transfer_count} times. A further transfer will raise a ping-pong alert.</div>}
           {err && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{err}</div>}
-          <button onClick={submit} className="w-full rounded-lg bg-navy py-2.5 text-sm font-semibold text-white hover:bg-navy-2">Confirm</button>
+          {needsAck && (
+            <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-3.5 text-sm text-amber-900">
+              <div className="flex items-center gap-2 font-bold"><Siren size={16} /> Coordinate before acting</div>
+              <p className="mt-1">{c.guard.message}</p>
+              <Link to={c.guard.room_id ? `/rooms/${c.guard.room_id}` : `/overlaps?open=${c.guard.cluster_id}`} className="mt-2 inline-block font-semibold underline">
+                {c.guard.room_id ? `Open Coordination Room ${c.guard.room_id}` : 'Review the overlap and open a Coordination Room'}</Link>
+              <label className="mt-3 flex cursor-pointer items-start gap-2 text-[13px]">
+                <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="mt-0.5" />
+                <span>I have checked with {(c.guard.other_bureaus || []).join(', ') || 'the other Bureaus'} and want to proceed. This acknowledgement is recorded in the case history.</span>
+              </label>
+            </div>)}
+          <button onClick={submit} disabled={needsAck && !ack} className="w-full rounded-lg bg-navy py-2.5 text-sm font-semibold text-white hover:bg-navy-2 disabled:cursor-not-allowed disabled:opacity-40">Confirm</button>
           <p className="text-[11px] text-slate-400">Every action is time-stamped, attributed to your Bureau and added to the tamper-evident hash chain.</p>
         </div>
       </Drawer>
