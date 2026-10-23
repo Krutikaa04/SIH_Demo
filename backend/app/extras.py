@@ -15,6 +15,31 @@ UPLOADS = db.ROOT / "data" / "uploads"
 MAX_BYTES = 2 * 1024 * 1024
 
 
+@router.post("/api/complaints/preview")
+def complaint_preview(body: dict = Body(...), conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    return services.preview_complaint(conn, body, ctx)
+
+
+@router.post("/api/complaints")
+def register_complaint(body: dict = Body(...), conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    try:
+        d = services.clean_complaint(conn, body, ctx)
+        return services.register_complaint(conn, d, ctx)
+    except services.Unresolved as e:
+        raise HTTPException(422, detail={"code": "UNRESOLVED_INSTITUTION", "message": str(e),
+                                         "suggestions": e.suggestions})
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/api/complaints/import")
+def import_complaints(body: dict = Body(...), conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    try:
+        return services.import_complaints(conn, body.get("csv_text") or "", ctx, bool(body.get("dry_run", True)))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @router.get("/api/search/nl")
 def nl_search(q: str = "", conn=Depends(db.get_conn)):
     return nlsearch.parse(conn, q)

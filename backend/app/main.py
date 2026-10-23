@@ -60,7 +60,8 @@ def meta():
     return {"bureaus": [{"code": k, "name": v, "sla_days": SLA_DAYS[k]} for k, v in BUREAUS.items()],
             "regions": [{"name": k, "states": v} for k, v in REGION_STATES.items()],
             "categories": [{"name": n, "group": g} for n, g in CATEGORIES], "statuses": STATUSES,
-            "roles": [{"code": k, "label": v} for k, v in roles.ROLE_LABELS.items()]}
+            "roles": [{"code": k, "label": v} for k, v in roles.ROLE_LABELS.items()],
+            "sources": services.SOURCES}
 
 
 @app.get("/api/meta/officers")
@@ -115,7 +116,11 @@ def get_case(case_id: str, conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
     if ctx.role == "REGIONAL" and case["institution"]["region"] != ctx.region:
         roles.forbid("This case belongs to another region")
     case["allowed_actions"] = roles.allowed_actions(ctx, case["bureau"], case["institution"]["region"], case["status"])
-    c = db.one(conn, "SELECT room_id, cluster_id FROM cases WHERE case_id=?", (case_id,))
+    c = db.one(conn, "SELECT room_id, cluster_id, case_id, status, bureau_code FROM cases WHERE case_id=?", (case_id,))
+    guard = services.coordination_guard(conn, c)
+    case["guard"] = guard
+    if guard and guard["level"] == "block" and ctx.role != "SENIOR":
+        case["allowed_actions"] = [a for a in case["allowed_actions"] if a not in services.GUARDED_ACTIONS]
     if c["room_id"]:
         room = db.one(conn, "SELECT id,lead_bureau,status FROM coordination_rooms WHERE id=?", (c["room_id"],))
         case["room"] = room
@@ -139,6 +144,16 @@ def case_action(case_id: str, body: dict = Body(...), conn=Depends(db.get_conn),
     remarks = (body.get("remarks") or "").strip()
     if kind in ("remark", "dispose") and not remarks:
         raise HTTPException(400, "remarks are required")
+    # Coordination guard: overlapping / merged cases cannot be acted on blindly
+    guard = services.coordination_guard(conn, c)
+    ack_note = ""
+    if guard and kind in guard["applies_to"]:
+        if guard["level"] == "block" and ctx.role != "SENIOR":
+            raise HTTPException(403, guard["message"])
+        if not body.get("acknowledge_overlap"):
+            raise HTTPException(409, detail={"code": "OVERLAP_ACK_REQUIRED", "guard": guard,
+                                             "message": guard["message"]})
+        ack_note = f" [Acted with open coordination issue {guard['cluster_id']}: acknowledged by {ctx.persona[1]}]"
     P = ctx.persona
     stamp = db.iso(db.now(conn))
     bureau, upd = c["bureau_code"], {}
@@ -179,7 +194,7 @@ def case_action(case_id: str, body: dict = Body(...), conn=Depends(db.get_conn),
         upd = {"status": "Disposed", "disposed_on": stamp[:10], "outcome": remarks,
                "last_action": f"Disposed: {remarks}", "next_action": "—"}
     upd["last_action_at"] = stamp
-    db.append_action(conn, case_id, stamp, P[0], P[1], P[2], ACTION_LABEL[kind], from_b, to_b, text)
+    db.append_action(conn, case_id, stamp, P[0], P[1], P[2], ACTION_LABEL[kind], from_b, to_b, text + ack_note)
     conn.execute("UPDATE cases SET " + ",".join(f"{k}=?" for k in upd) + " WHERE case_id=?", (*upd.values(), case_id))
     if kind == "transfer" and upd["transfer_count"] >= 3 and not c["pingpong_at"]:
         conn.execute("UPDATE cases SET pingpong_at=? WHERE case_id=?", (stamp, case_id))

@@ -54,6 +54,27 @@ def flow(round_no):
     _, inst, _ = call(f"/institutions/{hero['institution']['aicte_id']}")
     check("hero institution is high risk", inst["risk"]["band"] == "HIGH", f"(risk {inst['risk']['score']})")
 
+    # --- register a complaint through the pipeline (misspelt name, no ID) and hit the coordination guard
+    new = {"institution_name": "Kaveri Inst of Technology Bangalore", "bureau": "PGRC", "category": "Infrastructure Deficiency",
+           "description": "Students say laboratory machines are broken and the library has been closed for a long time.",
+           "severity": 4, "source": "Email"}
+    _, pv, _ = call("/complaints/preview", "POST", new, role="PGRC")
+    check("form preview resolves the misspelt name and warns of an overlap",
+          pv["resolution"] and pv["resolution"]["method"] == "NAME" and any(o["band"] == "HIGH" for o in pv["potential_overlaps"]))
+    s, reg, _ = call("/complaints", "POST", new, role="PGRC")
+    check("complaint registered with overlap alert", s == 200 and reg["overlaps"] and reg["overlaps"][0]["band"] == "HIGH",
+          f"({reg['case']['case_id']})" if s == 200 else str(reg))
+    s, dup, _ = call("/complaints", "POST", new, role="PGRC")
+    check("exact duplicate is rejected", s == 400)
+    new_id = urllib.parse.quote(reg["case"]["case_id"], safe="")
+    s, _, _ = call(f"/cases/{new_id}/actions", "POST", {"type": "escalate", "remarks": "x"}, role="PGRC")
+    check("guard: acting on an overlapping case needs acknowledgement (409)", s == 409)
+    s, _, _ = call(f"/cases/{new_id}/actions", "POST", {"type": "escalate", "remarks": "Escalating after checking with RB", "acknowledge_overlap": True}, role="PGRC")
+    check("guard: acknowledged action goes through and is logged", s == 200)
+    csv_text = "institution_name,bureau,category,description\nSahyadri Govt Coll Poona,RB,Faculty Deficiency,Regular teachers are missing in two departments.\nNowhere Institute Atlantis,RB,Faculty Deficiency,Shortage of teachers reported by students.\n"
+    _, imp, _ = call("/complaints/import", "POST", {"csv_text": csv_text, "dry_run": True}, role="RB")
+    check("CSV import dry-run: 1 ready, 1 needs review", imp["counts"]["ok"] == 1 and imp["counts"]["needs_review"] == 1)
+
     _, room, _ = call("/rooms", "POST", {"cluster_id": hero["cluster_id"]})
     call(f"/rooms/{room['id']}/comments", "POST", {"body": "RB will lead; PGRC to forward student statements."}, role="RB")
     call(f"/rooms/{room['id']}/lead", "POST", {"lead_bureau": "RB"})
@@ -61,6 +82,12 @@ def flow(round_no):
     check("non-lead Bureau cannot record the decision (403)", s403 == 403)
     _, room, _ = call(f"/rooms/{room['id']}/decision", "POST", {"outcome": "MERGE", "note": "Single show-cause notice by RB"})
     check("decision recorded", room["status"] == "MERGED")
+    hero_pg = next(c for c in room["cases"] if c["bureau"] == "PGRC")
+    hero_pg_id = urllib.parse.quote(hero_pg["case_id"], safe="")
+    s, _, _ = call(f"/cases/{hero_pg_id}/actions", "POST", {"type": "transfer", "to_bureau": "AB", "remarks": "x"}, role="PGRC")
+    check("guard: follower Bureau cannot transfer after MERGE (403)", s == 403)
+    s, _, _ = call(f"/cases/{hero_pg_id}/actions", "POST", {"type": "remark", "remarks": "Statements forwarded to RB"}, role="PGRC")
+    check("guard: follower Bureau can still add remarks", s == 200)
     _, d, _ = call("/dashboard/summary")
     check("effort-saved counter ticks", d["effort_saved"]["clusters_resolved"] == 1)
 
