@@ -1,0 +1,141 @@
+import { useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { ArrowLeft, CheckCircle2, Crown, GitMerge, Send, Split, Users } from 'lucide-react'
+import { post, useApi, useRole } from '../api'
+import { BureauBadge, Card, ErrorBox, Loading, ScoreRing, StatusChip, cx, fmtTs } from '../ui'
+import { BreakdownView } from './Overlaps'
+
+const OUTCOMES = [
+  { v: 'MERGE', t: 'Merge under lead Bureau', d: 'Lead Bureau takes the combined matter; other Bureaus follow its lead.', icon: GitMerge },
+  { v: 'RESOLVE', t: 'Coordinated — resolve', d: 'Bureaus agreed an action plan; overlap is closed.', icon: CheckCircle2 },
+  { v: 'KEEP_SEPARATE', t: 'Keep separate', d: 'Cases are unrelated; dismiss the overlap flag.', icon: Split },
+]
+
+export default function Room() {
+  const { id } = useParams()
+  const me = useRole()
+  const { data: r, error, loading, reload } = useApi<any>(`/rooms/${id}`)
+  const [comment, setComment] = useState('')
+  const [outcome, setOutcome] = useState('MERGE')
+  const [note, setNote] = useState('')
+  const [pairSel, setPairSel] = useState(0)
+  if (loading && !r) return <Loading />
+  if (error && !r) return <ErrorBox msg={error} />
+  const decided = !!r.decision
+  const canDecide = me.role === 'SENIOR' || me.role === r.lead_bureau
+  const canLead = me.role === 'SENIOR' || bureaus.includes(me.role)
+  const bureaus: string[] = Array.from(new Set(r.cases.map((c: any) => c.bureau)))
+  const bureauOf = (cid: string) => r.cases.find((c: any) => c.case_id === cid)?.bureau || ''
+
+  async function send() {
+    if (!comment.trim()) return
+    await post(`/rooms/${id}/comments`, { body: comment })
+    setComment(''); reload()
+  }
+
+  return (
+    <div className="mx-auto max-w-[1300px] space-y-5">
+      <Link to="/overlaps" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"><ArrowLeft size={15} /> Overlaps</Link>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-3"><div className="rounded-lg bg-navy p-2 text-white"><Users size={18} /></div>
+            <h1 className="text-xl font-bold tracking-tight">Coordination Room <span className="font-mono text-base text-slate-400">{r.id}</span></h1>
+            <span className={cx('rounded-full px-2.5 py-0.5 text-xs font-bold', decided ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700')}>{decided ? r.status : 'OPEN'}</span></div>
+          <Link to={`/institutions/${r.institution.aicte_id}`} className="mt-1 block text-slate-600 hover:underline">{r.institution.name} · {r.institution.region}</Link>
+        </div>
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-3">
+        <div className="space-y-5 lg:col-span-2">
+          <Card title="1 · Linked cases">
+            <ul className="divide-y divide-slate-100">
+              {r.cases.map((c: any) => (
+                <li key={c.case_id} className="flex flex-wrap items-center gap-3 py-2.5 text-sm">
+                  <BureauBadge code={c.bureau} />
+                  <Link to={`/cases/${c.case_id}`} className="font-semibold text-navy-2 hover:underline">{c.case_id}</Link>
+                  {c.bureau === r.lead_bureau && <span className="flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800"><Crown size={11} /> LEAD</span>}
+                  {c.bureau !== r.lead_bureau && decided && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">follows {r.lead_bureau}</span>}
+                  <span className="flex-1 truncate text-slate-500">{c.category}</span>
+                  <StatusChip status={c.status} />
+                  <span className="text-xs text-slate-400">{c.assigned_officer.name}</span>
+                </li>))}
+            </ul>
+          </Card>
+
+          <Card title="2 · Choose the lead Bureau">
+            <div className="flex flex-wrap gap-2">
+              {bureaus.map((b) => (
+                <button key={b} disabled={decided} onClick={async () => { await post(`/rooms/${id}/lead`, { lead_bureau: b }); reload() }}
+                  className={cx('flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition',
+                    r.lead_bureau === b ? 'border-navy bg-navy text-white shadow' : 'border-slate-200 hover:bg-slate-50', decided && 'cursor-default opacity-70')}>
+                  {r.lead_bureau === b && <Crown size={14} className="text-amber-300" />} {b}</button>))}
+            </div>
+            <p className="mt-2 text-xs text-slate-500">The lead Bureau drives the single line of action; the others share inputs and avoid parallel notices.</p>
+          </Card>
+
+          <Card title="3 · Discussion">
+            <ul className="max-h-72 space-y-3 overflow-auto pr-1">
+              {r.comments.length === 0 && <li className="text-sm text-slate-400">No comments yet — start the conversation.</li>}
+              {r.comments.map((c: any, i: number) => (
+                <li key={i} className={cx('rounded-lg p-3 text-sm', c.role === 'SYS' ? 'bg-slate-50 text-slate-500' : 'bg-indigo-50/60')}>
+                  <div className="mb-0.5 flex items-center gap-2 text-xs"><b className="text-slate-700">{c.author}</b>
+                    {c.role !== 'SYS' && <BureauBadge code={c.role} />}<span className="text-slate-400">{fmtTs(c.ts)}</span></div>
+                  {c.body}
+                </li>))}
+            </ul>
+            {!decided && (
+              <div className="mt-3 flex gap-2">
+                <input value={comment} onChange={(e) => setComment(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && send()}
+                  placeholder="Write a comment for the other Bureaus…" className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-navy-2" />
+                <button onClick={send} className="flex items-center gap-1.5 rounded-lg bg-navy px-3.5 text-sm font-semibold text-white hover:bg-navy-2"><Send size={14} /> Send</button>
+              </div>)}
+          </Card>
+
+          <Card title="4 · Decision">
+            {decided ? (
+              <div className="rounded-lg bg-emerald-50 p-4 text-sm text-emerald-800">
+                <div className="flex items-center gap-2 font-semibold"><CheckCircle2 size={18} /> {OUTCOMES.find((o) => o.v === r.decision.outcome)?.t} · lead {r.decision.lead_bureau}</div>
+                {r.decision.note && <p className="mt-1">{r.decision.note}</p>}
+                <div className="mt-1 text-xs text-emerald-700/80">Recorded by {r.decision.decided_by} · {fmtTs(r.decision.at)} · written to every linked case's audit trail.</div>
+              </div>) : (
+              <>
+                <div className="grid gap-2 md:grid-cols-3">
+                  {OUTCOMES.map((o) => (
+                    <button key={o.v} onClick={() => setOutcome(o.v)}
+                      className={cx('rounded-lg border p-3 text-left transition', outcome === o.v ? 'border-navy bg-navy/5 ring-1 ring-navy' : 'border-slate-200 hover:bg-slate-50')}>
+                      <o.icon size={18} className={outcome === o.v ? 'text-navy' : 'text-slate-400'} />
+                      <div className="mt-1.5 text-sm font-semibold">{o.t}</div><div className="mt-0.5 text-xs text-slate-500">{o.d}</div>
+                    </button>))}
+                </div>
+                <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Decision note (e.g. RB issues a single show-cause notice; PGRC forwards student statements)"
+                  className="mt-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-navy-2" />
+                <button onClick={async () => { await post(`/rooms/${id}/decision`, { outcome, lead_bureau: r.lead_bureau, note }); reload() }}
+                  className="mt-3 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700">Record decision (lead: {r.lead_bureau})</button>
+              </>)}
+          </Card>
+        </div>
+
+        <div className="space-y-5">
+          <Card title="Why these cases are linked">
+            {r.pairs.length > 1 && (
+              <div className="mb-3 flex flex-wrap gap-1.5">
+                {r.pairs.map((p: any, i: number) => (
+                  <button key={p.id} onClick={() => setPairSel(i)} className={cx('rounded-md border px-2 py-1 text-[11px] font-medium', i === pairSel ? 'border-navy bg-navy text-white' : 'border-slate-200 text-slate-600')}>
+                    {bureauOf(p.case_a)}↔{bureauOf(p.case_b)} {Math.round(p.score)}%</button>))}
+              </div>)}
+            <BreakdownView pair={r.pairs[pairSel] || r.pairs[0]} bureauOf={bureauOf} />
+          </Card>
+          <Card title="Combined timeline">
+            <ol className="max-h-[480px] space-y-3 overflow-auto pr-1">
+              {r.timeline.map((e: any, i: number) => (
+                <li key={i} className="text-sm">
+                  <div className="flex items-center gap-2"><BureauBadge code={e.actor.bureau} /><span className="font-medium text-slate-700">{e.action_type.replace('_', ' ')}</span><span className="text-[11px] text-slate-400">{fmtTs(e.ts)}</span></div>
+                  <div className="mt-0.5 text-xs text-slate-500">{e.case_id} — {e.remarks}</div>
+                </li>))}
+            </ol>
+          </Card>
+        </div>
+      </div>
+    </div>
+  )
+}

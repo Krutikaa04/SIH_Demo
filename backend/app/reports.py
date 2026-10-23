@@ -1,0 +1,298 @@
+"""Report builders (Bureau-wise, region-wise, institution-wise, ageing, disposal, overlaps, periodic) + briefing."""
+import csv
+import io
+from datetime import date, datetime, timedelta
+
+from . import db, risk, services
+from .constants import BUREAUS, REGION_STATES
+
+KINDS = {
+    "bureau": "Bureau / Cell-wise status report",
+    "region": "Region-wise report",
+    "institution": "Institution-wise complaint history & risk",
+    "ageing": "Pending case ageing analysis",
+    "disposal": "Disposal rate & performance",
+    "overlaps": "Overlapping / duplicate cases",
+    "periodic": "Monthly / quarterly performance",
+}
+
+
+def _d(s):
+    return datetime.strptime(s[:10], "%Y-%m-%d").date()
+
+
+def _load(conn, ctx):
+    today = db.now(conn).date()
+    rows = db.rows(conn, services.CASE_SELECT)
+    if ctx.role == "REGIONAL":
+        rows = [r for r in rows if r["inst_region"] == ctx.region]
+    for r in rows:
+        r["_sla"] = services.sla_info(r, today)
+        r["_open"] = r["status"] != "Disposed"
+        r["_age"] = r["_sla"]["age_days"]
+        if r["disposed_on"]:
+            r["_days_to_dispose"] = (_d(r["disposed_on"]) - _d(r["received_on"])).days
+    return rows, today
+
+
+def _pct(a, b):
+    return round(100 * a / b, 1) if b else 0.0
+
+
+def _avg(xs):
+    xs = list(xs)
+    return round(sum(xs) / len(xs), 1) if xs else 0.0
+
+
+def build(kind, conn, ctx, period="month"):
+    if kind not in KINDS:
+        raise KeyError(kind)
+    rows, today = _load(conn, ctx)
+    out = globals()["_" + kind](conn, ctx, rows, today, period) if kind == "periodic" else \
+        globals()["_" + kind](conn, ctx, rows, today)
+    out.update({"kind": kind, "title": KINDS[kind], "generated_at": db.iso(db.now(conn)),
+                "scope": ctx.region + " region" if ctx.role == "REGIONAL" else "All regions"})
+    open_ = [r for r in rows if r["_open"]]
+    out["summary"] = [{"label": "Total received", "value": len(rows)}, {"label": "Pending", "value": len(open_)},
+                      {"label": "Disposed", "value": len(rows) - len(open_)},
+                      {"label": "Beyond timeline", "value": sum(1 for r in open_ if r["_sla"]["state"] == "BREACHED")}]
+    return out
+
+
+def _bureau(conn, ctx, rows, today):
+    cols = [("bureau", "Bureau"), ("name", "Name"), ("total", "Cases"), ("pending", "Pending"),
+            ("under_process", "Under process"), ("transferred", "Transferred"), ("escalated", "Escalated"),
+            ("disposed", "Disposed"), ("overdue", "Beyond timeline"), ("nearing", "Nearing"),
+            ("disposal_rate", "Disposal %"), ("avg_pending_age", "Avg pending age (d)")]
+    data = []
+    for b, name in BUREAUS.items():
+        m = [r for r in rows if r["bureau_code"] == b]
+        o = [r for r in m if r["_open"]]
+        data.append({"bureau": b, "name": name, "total": len(m), "pending": len(o),
+                     "under_process": sum(1 for r in m if r["status"] == "Under Process"),
+                     "transferred": sum(1 for r in m if r["status"] == "Transferred"),
+                     "escalated": sum(1 for r in m if r["status"] == "Escalated"),
+                     "disposed": len(m) - len(o),
+                     "overdue": sum(1 for r in o if r["_sla"]["state"] == "BREACHED"),
+                     "nearing": sum(1 for r in o if r["_sla"]["state"] == "NEARING"),
+                     "disposal_rate": _pct(len(m) - len(o), len(m)), "avg_pending_age": _avg(r["_age"] for r in o)})
+    return {"columns": [{"key": k, "label": l} for k, l in cols], "rows": data,
+            "chart": {"x": "bureau", "series": [{"key": "pending", "label": "Pending", "color": "#3b82f6"},
+                                                {"key": "overdue", "label": "Beyond timeline", "color": "#dc2626"},
+                                                {"key": "disposed", "label": "Disposed", "color": "#16a34a"}]}}
+
+
+def _region(conn, ctx, rows, today):
+    rk = risk.compute_all(conn)
+    inst_region = {r["aicte_id"]: r["region"] for r in db.rows(conn, "SELECT aicte_id,region FROM institutions")}
+    cols = [("region", "Region"), ("total", "Cases"), ("pending", "Pending"), ("disposed", "Disposed"),
+            ("overdue", "Beyond timeline"), ("disposal_rate", "Disposal %"), ("in_overlap", "Cases in overlap"),
+            ("avg_risk", "Avg institution risk")]
+    data = []
+    for reg in REGION_STATES:
+        if ctx.role == "REGIONAL" and reg != ctx.region:
+            continue
+        m = [r for r in rows if r["inst_region"] == reg]
+        o = [r for r in m if r["_open"]]
+        risks = [rk[i]["score"] for i, rg in inst_region.items() if rg == reg and i in rk]
+        data.append({"region": reg, "total": len(m), "pending": len(o), "disposed": len(m) - len(o),
+                     "overdue": sum(1 for r in o if r["_sla"]["state"] == "BREACHED"),
+                     "disposal_rate": _pct(len(m) - len(o), len(m)), "in_overlap": sum(1 for r in o if r["cluster_id"]),
+                     "avg_risk": _avg(risks)})
+    return {"columns": [{"key": k, "label": l} for k, l in cols], "rows": data,
+            "chart": {"x": "region", "series": [{"key": "pending", "label": "Pending", "color": "#3b82f6"},
+                                                {"key": "overdue", "label": "Beyond timeline", "color": "#dc2626"}]}}
+
+
+def _institution(conn, ctx, rows, today):
+    rk = risk.compute_all(conn)
+    insts = {r["aicte_id"]: r for r in db.rows(conn, "SELECT * FROM institutions")}
+    by = {}
+    for r in rows:
+        by.setdefault(r["institution_id"], []).append(r)
+    cols = [("name", "Institution"), ("aicte_id", "AICTE ID"), ("region", "Region"), ("total", "Total"),
+            ("pending", "Pending"), ("disposed", "Disposed"), ("overdue", "Beyond timeline"),
+            ("bureaus", "Bureaus involved"), ("in_overlap", "In overlap"), ("risk", "Risk score"), ("risk_band", "Risk")]
+    data = []
+    for iid, m in by.items():
+        o = [r for r in m if r["_open"]]
+        data.append({"name": insts[iid]["name"], "aicte_id": iid, "region": insts[iid]["region"], "total": len(m),
+                     "pending": len(o), "disposed": len(m) - len(o),
+                     "overdue": sum(1 for r in o if r["_sla"]["state"] == "BREACHED"),
+                     "bureaus": ", ".join(sorted({r["bureau_code"] for r in o})) or "—",
+                     "in_overlap": sum(1 for r in o if r["cluster_id"]), "risk": rk[iid]["score"],
+                     "risk_band": rk[iid]["band"]})
+    data.sort(key=lambda x: -x["risk"])
+    top = data[:12]
+    return {"columns": [{"key": k, "label": l} for k, l in cols], "rows": data,
+            "chart": {"x": "short", "rows": [{**t, "short": t["name"].split(",")[-1].strip() + " · " + t["name"].split()[0]} for t in top],
+                      "series": [{"key": "risk", "label": "Risk score", "color": "#dc2626"}]}}
+
+
+def _ageing(conn, ctx, rows, today):
+    cols = [("bureau", "Bureau"), ("b1", "0-15 days"), ("b2", "16-30 days"), ("b3", "31-60 days"), ("b4", "60+ days"),
+            ("pending", "Total pending"), ("oldest", "Oldest (days)")]
+    data = []
+    for b in BUREAUS:
+        o = [r for r in rows if r["_open"] and r["bureau_code"] == b]
+        data.append({"bureau": b, "b1": sum(1 for r in o if r["_age"] <= 15),
+                     "b2": sum(1 for r in o if 15 < r["_age"] <= 30), "b3": sum(1 for r in o if 30 < r["_age"] <= 60),
+                     "b4": sum(1 for r in o if r["_age"] > 60), "pending": len(o),
+                     "oldest": max((r["_age"] for r in o), default=0)})
+    return {"columns": [{"key": k, "label": l} for k, l in cols], "rows": data,
+            "chart": {"x": "bureau", "stacked": True, "series": [
+                {"key": "b1", "label": "0-15 d", "color": "#22c55e"}, {"key": "b2", "label": "16-30 d", "color": "#eab308"},
+                {"key": "b3", "label": "31-60 d", "color": "#f97316"}, {"key": "b4", "label": "60+ d", "color": "#dc2626"}]}}
+
+
+def _disposal(conn, ctx, rows, today):
+    cols = [("bureau", "Bureau"), ("total", "Cases"), ("disposed", "Disposed"), ("rate", "Disposal %"),
+            ("avg_days", "Avg days to dispose"), ("within_sla", "Disposed within timeline %")]
+    data = []
+    groups = [(b, [r for r in rows if r["bureau_code"] == b]) for b in BUREAUS] + [("ALL", rows)]
+    for b, m in groups:
+        d = [r for r in m if not r["_open"] and "_days_to_dispose" in r]
+        data.append({"bureau": b, "total": len(m), "disposed": len(d), "rate": _pct(len(d), len(m)),
+                     "avg_days": _avg(r["_days_to_dispose"] for r in d),
+                     "within_sla": _pct(sum(1 for r in d if r["_days_to_dispose"] <= r["sla_days"]), len(d))})
+    return {"columns": [{"key": k, "label": l} for k, l in cols], "rows": data,
+            "chart": {"x": "bureau", "series": [{"key": "rate", "label": "Disposal %", "color": "#16a34a"},
+                                                {"key": "within_sla", "label": "Within timeline %", "color": "#2563eb"}]}}
+
+
+def _overlaps(conn, ctx, rows, today):
+    cols = [("cluster", "Cluster"), ("institution", "Institution"), ("region", "Region"), ("bureaus", "Bureaus"),
+            ("cases", "Cases"), ("score", "Match %"), ("status", "Status"), ("room", "Coordination Room"),
+            ("decision", "Decision")]
+    data = []
+    for c in services.clusters_view(conn, only_active=False):
+        if ctx.role == "REGIONAL" and c["institution"]["region"] != ctx.region:
+            continue
+        room = db.one(conn, "SELECT id,lead_bureau,decision FROM coordination_rooms WHERE cluster_id=?", (c["cluster_id"],))
+        dec = ""
+        if room and room["decision"]:
+            import json
+            d = json.loads(room["decision"])
+            dec = f"{d['outcome']} (lead {d['lead_bureau']})"
+        data.append({"cluster": c["cluster_id"], "institution": c["institution"]["name"],
+                     "region": c["institution"]["region"], "bureaus": ", ".join(c["bureaus"]),
+                     "cases": len(c["cases"]), "score": round(c["score"]), "status": c["status"],
+                     "room": room["id"] if room else "—", "decision": dec or "—"})
+    by_status = {}
+    for r in data:
+        by_status[r["status"]] = by_status.get(r["status"], 0) + 1
+    chart_rows = [{"status": k, "clusters": v} for k, v in by_status.items()]
+    return {"columns": [{"key": k, "label": l} for k, l in cols], "rows": data,
+            "chart": {"x": "status", "rows": chart_rows, "series": [{"key": "clusters", "label": "Clusters", "color": "#7c3aed"}]}}
+
+
+def _periodic(conn, ctx, rows, today, period="month"):
+    periods = []
+    if period == "quarter":
+        y, q = today.year, (today.month - 1) // 3
+        for _ in range(6):
+            start = date(y, q * 3 + 1, 1)
+            end = date(y + (1 if q == 3 else 0), 1 if q == 3 else q * 3 + 4, 1) - timedelta(days=1)
+            periods.append((f"{y} Q{q + 1}", start, end))
+            q -= 1
+            if q < 0:
+                y, q = y - 1, 3
+    else:
+        y, m = today.year, today.month
+        for _ in range(12):
+            start = date(y, m, 1)
+            end = (date(y + (m == 12), 1 if m == 12 else m + 1, 1)) - timedelta(days=1)
+            periods.append((f"{y}-{m:02d}", start, end))
+            m -= 1
+            if m == 0:
+                y, m = y - 1, 12
+    periods.reverse()
+    cols = [("period", "Quarter" if period == "quarter" else "Month"), ("received", "Received"), ("disposed", "Disposed"),
+            ("backlog", "Pending at period end"), ("within_sla", "Disposed within timeline %"),
+            ("avg_days", "Avg days to dispose")]
+    data = []
+    for label, start, end in periods:
+        rec = [r for r in rows if start <= _d(r["received_on"]) <= end]
+        dis = [r for r in rows if r["disposed_on"] and start <= _d(r["disposed_on"]) <= end]
+        backlog = [r for r in rows if _d(r["received_on"]) <= end and (not r["disposed_on"] or _d(r["disposed_on"]) > end)]
+        data.append({"period": label, "received": len(rec), "disposed": len(dis), "backlog": len(backlog),
+                     "within_sla": _pct(sum(1 for r in dis if r.get("_days_to_dispose", 9999) <= r["sla_days"]), len(dis)),
+                     "avg_days": _avg(r["_days_to_dispose"] for r in dis if "_days_to_dispose" in r)})
+    return {"columns": [{"key": k, "label": l} for k, l in cols], "rows": data, "period": period,
+            "chart": {"x": "period", "series": [{"key": "received", "label": "Received", "color": "#1d4ed8"},
+                                                {"key": "disposed", "label": "Disposed", "color": "#16a34a"}]}}
+
+
+def to_csv(rep):
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([rep["title"], rep["scope"], "Generated " + rep["generated_at"], "SYNTHETIC DATA - PROTOTYPE"])
+    w.writerow([c["label"] for c in rep["columns"]])
+    for r in rep["rows"]:
+        w.writerow([r.get(c["key"], "") for c in rep["columns"]])
+    return "﻿" + buf.getvalue()  # BOM so Excel opens UTF-8 correctly
+
+
+def cases_csv(rows):
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Case ID", "Reference", "Institution", "AICTE ID", "Region", "Category", "Bureau", "Status",
+                "Officer", "Received", "Due", "Timeline", "Days remaining", "Last action", "Next action", "Overlap cluster"])
+    for c in rows:
+        w.writerow([c["case_id"], c["reference_no"], c["institution"]["name"], c["institution"]["aicte_id"],
+                    c["institution"]["region"], c["category"], c["bureau"], c["status"], c["assigned_officer"]["name"],
+                    c["received_on"], c["expected_disposal"], c["sla"]["state"], c["sla"]["remaining_days"],
+                    c["last_action"], c["next_action"], (c["overlap"] or {}).get("cluster_id", "")])
+    return "﻿" + buf.getvalue()
+
+
+# ---------------------------------------------------------------- briefing --------
+
+def briefing(conn, ctx):
+    """Rule-based narrative for management, driven by live numbers (template text, not an LLM)."""
+    rows, today = _load(conn, ctx)
+    open_ = [r for r in rows if r["_open"]]
+    items = []
+    cmap = {k: v for k, v in services.cluster_map(conn).items()
+            if v["status"] in ("OPEN", "LINKED") and v["cases"] & {r["case_id"] for r in rows}}
+    if cmap:
+        top = max(services.clusters_view(conn), key=lambda c: c["score"] if c["cluster_id"] in cmap else -1)
+        items.append({"tone": "red", "link": "/overlaps",
+                      "text": f"{len(cmap)} institutions have complaints handled by 2+ Bureaus in parallel. Strongest match: "
+                              f"{top['institution']['name']} ({round(top['score'])}%, {' × '.join(top['bureaus'])})."})
+    beyond = [r for r in open_ if r["_sla"]["state"] == "BREACHED"]
+    soon = [r for r in open_ if 0 <= r["_sla"]["remaining_days"] <= 7]
+    items.append({"tone": "amber", "link": "/cases?overdue=1",
+                  "text": f"{len(beyond)} cases are beyond their prescribed timeline; {len(soon)} more will breach within 7 days."})
+    if beyond:
+        by_reg = {}
+        for r in beyond:
+            by_reg[r["inst_region"]] = by_reg.get(r["inst_region"], 0) + 1
+        by_bur = {}
+        for r in beyond:
+            by_bur[r["bureau_code"]] = by_bur.get(r["bureau_code"], 0) + 1
+        reg = max(by_reg, key=by_reg.get)
+        bur = max(by_bur, key=by_bur.get)
+        items.append({"tone": "blue", "link": f"/cases?overdue=1&region={reg}",
+                      "text": f"Most overdue cases: {reg} region ({by_reg[reg]}) and {bur} ({by_bur[bur]})."})
+    rk = risk.compute_all(conn)
+    insts = {r["aicte_id"]: r for r in db.rows(conn, "SELECT aicte_id,name,region FROM institutions")}
+    scoped = {r["institution_id"] for r in rows}
+    ranked = sorted(((rk[i]["score"], i) for i in scoped), reverse=True)
+    if ranked:
+        sc, iid = ranked[0]
+        n_open = sum(1 for r in open_ if r["institution_id"] == iid)
+        items.append({"tone": "red", "link": f"/institutions/{iid}",
+                      "text": f"Highest-risk institution: {insts[iid]['name']} (risk {sc}) with {n_open} open complaints. "
+                              f"{sum(1 for s, _ in ranked if s >= 70)} institutions are in the high-risk band."})
+    pp = [r for r in open_ if r["transfer_count"] >= 3]
+    if pp:
+        items.append({"tone": "amber", "link": "/cases?status=Pending",
+                      "text": f"{len(pp)} open cases have been transferred 3+ times — ownership needs fixing."})
+    old = max(open_, key=lambda r: r["_age"], default=None)
+    disposed = [r for r in rows if not r["_open"]]
+    if old:
+        items.append({"tone": "green", "link": f"/cases/{old['case_id']}",
+                      "text": f"Disposal rate is {_pct(len(disposed), len(rows))}%. Oldest pending case: {old['case_id']} "
+                              f"({old['_age']} days, {old['bureau_code']})."})
+    return items

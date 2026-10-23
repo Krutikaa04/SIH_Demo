@@ -1,0 +1,4 @@
+fastapi>=0.110
+uvicorn>=0.29
+rapidfuzz>=3.6
+scikit-learn>=1.4
