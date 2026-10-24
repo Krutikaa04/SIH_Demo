@@ -184,11 +184,43 @@ def clusters_view(conn, only_active=True):
 
 # ---- write flows ---------------------------------------------------------------------
 
+
+
 def next_case_number(conn, bureau, year):
     prefix = f"{bureau}/{year}/"
-    r = conn.execute("SELECT MAX(case_id) FROM cases WHERE case_id LIKE ?", (prefix + "%",)).fetchone()[0]
-    n = int(r.split("/")[-1]) + 1 if r else 1
-    return f"{prefix}{n:05d}"
+
+    # Preserve the highest case number already present in the database.
+    existing = conn.execute(
+        "SELECT MAX(CAST(SUBSTR(case_id, ?) AS INTEGER)) "
+        "FROM cases WHERE case_id LIKE ?",
+        (len(prefix) + 1, prefix + "%"),
+    ).fetchone()[0] or 0
+
+    # Initialize or synchronize the counter without moving it backwards.
+    conn.execute(
+        """
+        INSERT INTO case_number_counters(bureau, year, value)
+        VALUES (?, ?, ?)
+        ON CONFLICT(bureau, year) DO UPDATE
+        SET value = MAX(case_number_counters.value, excluded.value)
+        """,
+        (bureau, year, existing),
+    )
+
+    # Atomically allocate the next number.
+    row = conn.execute(
+        """
+        INSERT INTO case_number_counters(bureau, year, value)
+        VALUES (?, ?, 1)
+        ON CONFLICT(bureau, year) DO UPDATE
+        SET value = case_number_counters.value + 1
+        RETURNING value
+        """,
+        (bureau, year),
+    ).fetchone()
+
+    return f"{prefix}{int(row['value']):05d}"
+
 
 
 def create_alert(conn, type_, severity, message, case_id=None, institution_id=None, pair_id=None,
@@ -453,19 +485,32 @@ def import_complaints(conn, csv_text, ctx, dry_run=True):
 
 def simulate_complaint(conn, scenario=None):
     """File a scripted complaint through the same pipeline the Register form uses."""
-    n = int(db.get_setting(conn, "sim_counter", "0"))
     if scenario:
         n = int(scenario) - 1
+    else:
+        n = db.next_counter(conn, "sim_counter") - 1
+
     spec = seed.simulate_spec(conn, n)
-    db.set_setting(conn, "sim_counter", n + 1)
-    d = {"institution_name": spec["name"], "institution_id": None, "aicte_id": None, "bureau": spec["bureau"],
-         "category": spec["category"], "description": spec["text"], "severity": 4, "source": "CPGRAMS",
-         "received_on": str(db.now(conn).date())}
+
+    d = {
+        "institution_name": spec["name"],
+        "institution_id": None,
+        "aicte_id": None,
+        "bureau": spec["bureau"],
+        "category": spec["category"],
+        "description": spec["text"],
+        "severity": 4,
+        "source": "CPGRAMS",
+        "received_on": str(db.now(conn).date()),
+    }
+
     try:
         out = register_complaint(conn, d)
-    except Unresolved:  # scripted fallback: the demo must never fail on a garbled name
+    except Unresolved:
+        # Scripted fallback: the demo must never fail on a garbled name.
         d["institution_id"] = spec["institution"]["aicte_id"]
         out = register_complaint(conn, d)
+
     return {"case": out["case"], "overlaps": out["overlaps"]}
 
 
