@@ -110,8 +110,8 @@ sessions are tracked separately in issue #22.
 
 ## Continuous integration and reproducible installs
 
-GitHub Actions runs `backend`, `frontend` and `smoke` on every PR, including stacked
-PRs, and pushes to `master`. The aggregate `ci` check succeeds only when all three
+GitHub Actions runs `backend`, `frontend`, `smoke` and a Windows `bundle` check on every PR, including stacked
+PRs, and pushes to `master`. The aggregate `ci` check succeeds only when all four
 jobs pass. CI uses Python 3.13 and Node 24. Locally, the pinned Python dependencies
 require Python 3.12 or newer. Install with
 `python -m pip install -r requirements.txt -r requirements-dev.txt`.
@@ -131,3 +131,8 @@ bundle script refreshes the required wheels rather than reusing an unchecked cac
 Maintainers can require the aggregate `ci` status check in a branch-protection rule
 for `master`; repository settings are managed by the team. CODEOWNERS is deferred
 until the team agrees on owners.
+
+The Windows CI job builds and extracts the actual PowerShell bundle, creates an
+empty Python environment, removes Node from the launcher PATH and invokes
+`python scripts/ci_smoke.py --batch` from the extracted copy. This exercises
+`start_demo.bat`, its offline wheel installation and both demo smoke rounds.

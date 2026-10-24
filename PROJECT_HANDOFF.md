@@ -458,3 +458,7 @@ and CI exercises Python 3.13 / Node 24. The runtime wheelhouse is refreshed duri
 bundle creation; CI proves the no-index installation on its runner platform. Windows
 bundles still need to be prepared on their target platform. Branch protection and
 CODEOWNERS remain team decisions; no repository settings are changed by this work.
+
+Windows CI also builds the actual bundle and runs its batch launcher from the
+extracted copy in an empty Python environment with Node absent from PATH. The
+aggregate check requires this bundle job in addition to backend/frontend/smoke.
