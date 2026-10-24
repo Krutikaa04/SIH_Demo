@@ -37,8 +37,8 @@ Run the backend in another terminal with `python run.py --no-browser`.
 - **Simulate New Complaint** button: files a scripted complaint through the real pipeline and fires a live alert
 - **SLA engine**: countdown timers, 75% warnings, auto-escalation at 100% (Deputy Director) and 150% (Director),
   ping-pong transfer alerts and daily pending-reminder digests. Demo > "Time machine: +7 days" triggers it live
-- **Case workflow**: remark, assign, transfer, escalate, dispose; every action is hash-chained, with
-  "Verify integrity" and a demo "Tamper with a record" button
+- **Case workflow & Audit Vault**: remark, assign, transfer, escalate, dispose; every action is hash-chained
+  in a tamper-evident ledger (`/audit`) with "Verify chain" and demo "Tamper with a record" button
 - **Institution risk score** (volume + severity + repeat offences + overdue), colour-coded, with breakdown
 - **Role switcher** (RB, PGRC, AB, LC, VIG, Regional Office, Senior Management): different dashboards and a
   server-enforced permission matrix (no login in this prototype)

@@ -599,6 +599,101 @@ def simulate(body: dict = Body(default={}), conn=Depends(db.get_conn)):
     return services.simulate_complaint(conn, body.get("scenario"))
 
 
+@app.get("/api/audit/ledger")
+def audit_ledger(case_id: str = "", action_type: str = "", actor_bureau: str = "",
+                 date_from: str = "", date_to: str = "", page: int = Query(1, ge=1),
+                 page_size: int = Query(50, ge=1), conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    effective_page_size = min(max(1, page_size), 200)
+    where, params = [], []
+
+    if ctx.role == "REGIONAL":
+        where.append("i.region = ?")
+        params.append(ctx.region)
+
+    if case_id:
+        where.append("a.case_id = ?")
+        params.append(case_id.strip())
+
+    if action_type:
+        where.append("a.action_type = ?")
+        params.append(action_type.strip())
+
+    if actor_bureau:
+        where.append("a.actor_bureau = ?")
+        params.append(actor_bureau.strip())
+
+    if date_from:
+        where.append("a.ts >= ?")
+        params.append(date_from.strip())
+
+    if date_to:
+        d_to = date_to.strip()
+        if "T" not in d_to and len(d_to) == 10:
+            d_to += "T23:59:59"
+        where.append("a.ts <= ?")
+        params.append(d_to)
+
+    w = ("WHERE " + " AND ".join(where)) if where else ""
+
+    # Total count matching query
+    count_sql = f"""
+    SELECT COUNT(*)
+    FROM action_history a
+    LEFT JOIN cases c ON a.case_id = c.case_id
+    LEFT JOIN institutions i ON c.institution_id = i.aicte_id
+    {w}
+    """
+    total = conn.execute(count_sql, params).fetchone()[0]
+
+    # Query paginated rows
+    offset = (page - 1) * effective_page_size
+    select_sql = f"""
+    SELECT
+      a.id, a.case_id, a.seq, a.ts, a.actor_id, a.actor_name, a.actor_bureau,
+      COALESCE(a.actor_name, a.actor_id) as actor,
+      a.action_type, a.from_bureau, a.to_bureau, a.remarks, a.prev_hash, a.hash,
+      c.institution_id,
+      COALESCE(i.name, c.submitted_institution_name, 'Unknown Institution') as institution_name,
+      COALESCE(i.region, 'Unknown') as region,
+      c.bureau_code as case_bureau
+    FROM action_history a
+    LEFT JOIN cases c ON a.case_id = c.case_id
+    LEFT JOIN institutions i ON c.institution_id = i.aicte_id
+    {w}
+    ORDER BY a.ts DESC, a.id DESC
+    LIMIT ? OFFSET ?
+    """
+    items = db.rows(conn, select_sql, (*params, effective_page_size, offset))
+
+    # Action counts scoped by role for quick filtering badges
+    role_where = "WHERE i.region = ?" if ctx.role == "REGIONAL" else ""
+    role_params = (ctx.region,) if ctx.role == "REGIONAL" else ()
+    action_counts_sql = f"""
+    SELECT a.action_type, COUNT(*)
+    FROM action_history a
+    LEFT JOIN cases c ON a.case_id = c.case_id
+    LEFT JOIN institutions i ON c.institution_id = i.aicte_id
+    {role_where}
+    GROUP BY a.action_type
+    """
+    action_counts = dict(conn.execute(action_counts_sql, role_params).fetchall())
+
+    tip_hash = None
+    if case_id:
+        latest = conn.execute("SELECT hash FROM action_history WHERE case_id=? ORDER BY seq DESC LIMIT 1",
+                              (case_id.strip(),)).fetchone()
+        tip_hash = latest[0] if latest else None
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": effective_page_size,
+        "action_counts": action_counts,
+        "tip_hash_by_case": {case_id.strip(): tip_hash} if case_id and tip_hash else None,
+    }
+
+
 @app.get("/api/audit/verify")
 def verify(case_id: str = "", conn=Depends(db.get_conn)):
     return db.verify_chain(conn, case_id or None)
