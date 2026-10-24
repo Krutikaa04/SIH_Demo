@@ -322,7 +322,7 @@ export default function Reports() {
             right={<div className="flex items-center gap-3 text-xs text-slate-400">
               {kind === 'periodic' && (
                 <div className="flex rounded-lg bg-slate-100 p-0.5 text-sm">
-                  {(['month', 'quarter'] as const).map((p) => <button key={p} onClick={() => setPeriod(p)} className={cx('rounded-md px-2.5 py-1 font-medium capitalize', period === p ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500')}>{p}ly</button>)}
+                  {(['month', 'quarter'] as const).map((p) => <button key={p} onClick={() => setParam('period', p)} className={cx('rounded-md px-2.5 py-1 font-medium capitalize', period === p ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500')}>{p}ly</button>)}
                 </div>)}
               {rep.scope} · {rep.generated_at.slice(0, 16).replace('T', ' ')}</div>}>
             <div className="h-64">
