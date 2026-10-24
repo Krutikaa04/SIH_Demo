@@ -23,8 +23,8 @@ export default function Room() {
   if (error && !r) return <ErrorBox msg={error} />
   const decided = !!r.decision
   const canDecide = me.role === 'SENIOR' || me.role === r.lead_bureau
-  const canLead = me.role === 'SENIOR' || bureaus.includes(me.role)
   const bureaus: string[] = Array.from(new Set(r.cases.map((c: any) => c.bureau)))
+  const canLead = me.role === 'SENIOR' || bureaus.includes(me.role)
   const bureauOf = (cid: string) => r.cases.find((c: any) => c.case_id === cid)?.bureau || ''
 
   async function send() {
