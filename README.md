@@ -15,7 +15,7 @@ python run.py                     # seeds the demo DB on first run, opens http:/
 
 Options: `python run.py --reseed` (rebuild the demo data), `python run.py --no-browser`.
 
-The built UI is committed in `frontend/dist`, so Node is **not** needed to run the demo.
+The built UI is included in the offline demo bundle published through GitHub Releases. Running the demo from a fresh source checkout requires Node.js to build the frontend. The packaged demo laptop needs Python only.
 
 ## Develop the UI (optional, needs Node 20+)
 
