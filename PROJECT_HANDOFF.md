@@ -47,7 +47,7 @@ Legend: ✅ built and tested · 🟡 built, simplified on purpose (LITE) · 🎭
 | # | Feature | Status | Notes |
 |---|---|---|---|
 | A | Explainable overlap engine (score breakdown) | ✅ | 5 signals, "Why flagged" drawer |
-| B | Coordination Room | 🟡 | Link → lead Bureau → comments → decision (MERGE / RESOLVE / KEEP_SEPARATE). "Merge" is logical, not a physical record merge |
+| B | Coordination Room | 🟡 | Link → lead Bureau → comments → decision (MERGE / RESOLVE / KEEP_SEPARATE). Officials can also **link cases manually** and add/remove cases of a room. "Merge" is logical, not a physical record merge |
 | B+ | **Coordination guard** | ✅ | Acting on an overlapping case needs a logged acknowledgement; after a MERGE the non-lead Bureau is blocked from transfer/escalate/dispose (`services.coordination_guard`) |
 | C | Institution risk score | ✅ | `risk.py`; badge + breakdown on profile, list, dashboard |
 | D | Auto-escalation + SLA countdown | ✅ | `sla.py` engine (30 s tick), live `Countdown` component |
@@ -114,6 +114,7 @@ backend/app/
   db.py                        schema, connection, settings, demo clock, append_action + verify_chain, READY reset lock
   seed.py                      synthetic data generator + planted scenarios + simulate_spec()
   intel.py                     name normalisation, Registry.resolve(), TextModel (TF-IDF), score_pair(), detect(), recluster()
+  links.py                     manual case links + Coordination Room membership (add / remove case)
   services.py                  case_where() filter builder, SLA info, serialisers, clusters_view(), simulate_complaint()
   sla.py                       tick() engine, reminder_digest(), init_state()
   risk.py                      institution risk score
@@ -222,7 +223,7 @@ No login. The UI sends `X-Role` (`RB|PGRC|AB|LC|VIG|REGIONAL|SENIOR`) and `X-Reg
 | RB / PGRC / AB / LC / VIG | everything (single window) | remark, assign, transfer, escalate, dispose — **only on cases currently assigned to their Bureau** |
 | REGIONAL | own region only (cases, institutions, alerts, dashboard) | remark only, only in own region |
 | SENIOR | everything | remark, escalate (not transfer/dispose) |
-- Coordination Room: any non-regional role can open a room (anyone can comment); **only the lead Bureau or Senior can record the decision**; only participating Bureaus/Senior can set the lead.
+- Coordination Room: any non-regional role can open a room (anyone can comment); **only the lead Bureau or Senior can record the decision**; only participating Bureaus/Senior can set the lead. **Manual links and room membership** ([§7.6d](#76d-manual-links-and-room-membership-linkspy)): Regional never; a Bureau only where it owns one of the cases (or participates in the room); Senior always; a room that already has a decision can be changed by Senior only.
 - Bureau roles get a **"My desk"** panel on the dashboard; Senior/Regional get the **Daily briefing**.
 - Default role when no header is sent: `SENIOR`. Role is remembered in `localStorage` (`icmd.role`).
 
@@ -254,6 +255,14 @@ Applies to `transfer`, `escalate`, `dispose` only (remark / assign / documents a
 | MERGE and this case is the **lead's**, dispose while followers are still open | `ack` (`LEAD_WITH_OPEN_FOLLOWERS`, dispose only) | acknowledgement required |
 `GET /api/cases/{id}` returns `guard` (level, code, message, `applies_to`, room/lead/other Bureaus) and removes blocked actions from `allowed_actions`. RESOLVE / KEEP_SEPARATE decisions lift the guard.
 
+### 7.6d Manual links and room membership (`links.py`)
+The engine can miss a connection (different wording, odd names), so officials can link cases themselves. A manual link is an `overlap_pairs` row with `type='MANUAL'`, `score=100`, `band='HIGH'`, `status='CONFIRMED'` and the rationale/actor stored in `review_*`; it joins a cluster exactly like a detected pair, so the Overlaps list ("Manual" badge), the Coordination Room and the coordination guard treat it like any other overlap. `recluster` and `detect` never drop it.
+- `POST /api/links {case_a, case_b, rationale}`: same institution only (v1), different cases, rationale required (422), idempotent (an existing active pair is returned with `created:false`; a REJECTED/DISMISSED pair is revived as manual). Each case gets a `LINKED_MANUAL` history entry. If one of the cases is already in a room, the other joins it; two different rooms conflict (409).
+- `POST /api/rooms/{id}/cases {case_id, rationale?}`: the case must belong to the room's institution and not sit in another room (409). If it is not yet connected to the room's cluster it is linked (manually) to the earliest case of another Bureau; the case gets `LINKED`.
+- `DELETE /api/rooms/{id}/cases/{case_id}?reason=`: the case's pairs with the other members are set to REJECTED (so `recluster` does not pull it back), `room_id`/`cluster_id` are cleared, history `UNLINKED`. Refused (409) when fewer than two cases would remain or when the case is the only bridge between the remaining ones. A room with a decision (MERGED/RESOLVED) can only be changed by Senior.
+- `GET /api/rooms/{id}` returns `can_manage_members` for the caller; `Room.tsx` shows **Add case** / remove buttons only when true, `CaseDetail.tsx` has **Link to another case…**.
+- Every write goes through `db.append_action`, so the hash chain stays valid (tests assert `verify_chain` after each operation).
+
 ### 7.7 Natural-language search (`nlsearch.parse`)
 Rule-based grammar → the same filter params the Cases page uses + a list of **chips** ("I understood…"). Understands: status (pending/open, disposed, under process, transferred, escalated, pending info), flags (overdue/beyond timeline, nearing, overlap), Bureau names/codes, region names (longest match first so "south-western" ≠ "western") and states, categories (keyword → canonical), ages ("older than 30 days/2 months", "last 2 weeks", "this month/year", "since March"), AICTE ID, case ID, institution (fuzzy), city, and leftover keywords. Unknown text falls back to keyword search.
 
@@ -272,7 +281,7 @@ Rule-based grammar → the same filter params the Cases page uses + a list of **
 | `officers` | id (`OFF-RB-01`…), name, bureau_code, designation, level 1–4 (1–2 desk, 3 Deputy Director, 4 Director) |
 | `cases` | `case_id` (PK `RB/2026/00054`; prefix = *originating* Bureau), reference_no, institution_id, submitted_institution_name, submitted_aicte_id, resolution_method (`ID`/`NAME`/`NAME_LOW`), resolution_conf, source, received_on, category, category_group, severity 1–5, description, status, origin_bureau, **bureau_code (current handler)**, assigned_officer_id, last_action(+_at), next_action, sla_days, due_date, escalation_level, transfer_count, disposed_on, outcome, room_id, cluster_id, warned_at/breached_at/severe_at/pingpong_at |
 | `action_history` | case_id, seq, ts, actor_id/name/bureau, action_type (RECEIVED, ASSIGNED, REMARK, TRANSFER, ESCALATE, AUTO_ESCALATE, DISPOSE, LINKED, COORDINATION, DOC_ADDED), from/to bureau, remarks, prev_hash, hash — unique (case_id, seq) |
-| `overlap_pairs` | id (`PR-0001`), case_a, case_b, institution_id, type, score, band, breakdown (JSON), explanation, headline, cluster_id, status (OPEN/LINKED/RESOLVED/DISMISSED), detected_at |
+| `overlap_pairs` | id (`PR-0001`), case_a, case_b, institution_id, type (`CROSS_BUREAU` / `DUPLICATE` / `MANUAL`), score, band, breakdown (JSON), explanation, headline, cluster_id, status (OPEN/LINKED/CONFIRMED/DEFERRED/REJECTED/RESOLVED/DISMISSED), detected_at, review_* |
 | `coordination_rooms` / `room_cases` / `room_comments` | room id (`ROOM-0001`), cluster_id, lead_bureau, status (OPEN/MERGED/RESOLVED), decision (JSON), comments |
 | `alerts` | type (OVERLAP, SLA_NEAR, SLA_BREACH, ESCALATION, PENDING_REMINDER, PING_PONG), severity, case_id, institution_id, pair_id, cluster_id, message, created_at, is_read, link, target_bureaus, read_roles |
 | `documents` | case_id, seq, filename, path, sha256, size, uploaded_by, uploaded_at (files under `data/uploads/<case>/`) |
@@ -296,7 +305,8 @@ Rule-based grammar → the same filter params the Cases page uses + a list of **
 | `GET/POST /cases/{id}/documents` · `GET /documents/{id}/download` | list / upload (base64 JSON, ≤2 MB) / download; `verified` = file hash still matches |
 | `GET /institutions?q&region` · `GET /institutions/{aicte_id}` | list with risk; profile with cases, clusters, stats, risk breakdown |
 | `GET /overlaps?status=active\|all` · `GET /overlaps/{pair_id}` | clusters with pairs + breakdowns · one pair |
-| `POST /rooms {cluster_id}` · `GET /rooms/{id}` · `POST /rooms/{id}/comments` · `/lead` · `/decision` | Coordination Room (decision outcomes `MERGE`, `RESOLVE`, `KEEP_SEPARATE`) |
+| `POST /rooms {cluster_id}` · `GET /rooms/{id}` · `POST /rooms/{id}/comments` · `/lead` · `/decision` | Coordination Room (decision outcomes `MERGE`, `RESOLVE`, `KEEP_SEPARATE`); `GET` includes `can_manage_members` |
+| `POST /links {case_a, case_b, rationale}` · `POST /rooms/{id}/cases {case_id}` · `DELETE /rooms/{id}/cases/{case_id}?reason=` | manual link of two cases (`type='MANUAL'` pair) · add / remove a case in a room (see §7.6d) |
 | `GET /alerts?unread&type&limit` · `POST /alerts/{id}/read` · `POST /alerts/read-all` | alerts **visible to the caller's role** (each has a `link` and `target_bureaus`; `read` is per role; read endpoints 404 for alerts the role cannot see) |
 | `GET /search/nl?q=` | natural-language parse → `{chips, params}` |
 | `GET /reports/{bureau\|region\|institution\|ageing\|disposal\|overlaps\|periodic}?format=json\|csv&period=month\|quarter` | reports |
@@ -352,7 +362,7 @@ Interactive docs: `http://127.0.0.1:8000/docs` (FastAPI Swagger) while the app r
 - **No review queue** for complaints whose institution can't be resolved: the Register form asks the user to pick from suggestions, and CSV rows that don't match are reported as "needs review" and **skipped** (fix the CSV and re-upload). Nothing is parked for later.
 - **Weights are hand-set** (calibrated on the test pairs), not learned from feedback; no officer "was this right?" loop.
 - **SLA values are illustrative**; single SLA per Bureau (no per-category/statutory SLAs, no working-day/holiday calendar).
-- **Coordination "merge" is logical** — cases are linked under a lead Bureau (and the guard restricts follower Bureaus), but nothing syncs to systems of record. A room can only be opened from a **detected** cluster: there is **no manual link/unlink** of arbitrary cases yet.
+- **Coordination "merge" is logical** — cases are linked under a lead Bureau (and the guard restricts follower Bureaus), but nothing syncs to systems of record. Manual links are same-institution only (an institution renamed in the master list cannot be bridged), and a room can only be opened from a cluster (detected or manual).
 - **PDF has no charts**; no custom report builder, saved filters, or scheduled reports.
 - **Documents:** local disk only, ≤2 MB, no inline preview, no e-signature.
 - **Heatmap is region-level** (no district drill-down). Region names (8) should be verified against AICTE's real regional-office structure.
@@ -374,7 +384,6 @@ Suggested split mirrors the original four tracks. Effort is a rough developer-ho
 
 **Track B — Intelligence**
 - **Review queue for unresolved/ambiguous institution matches** (park the complaint, let an officer confirm later; reuse `Registry.suggest`) (3 h).
-- **Manual link/unlink of cases** and add/remove case in a Coordination Room (2 h).
 - **Officer feedback on overlaps** ("was this right?" thumbs) storing labels; script to re-tune weights/thresholds (3–4 h).
 - Multilingual (Hindi) matching via on-prem embeddings, e.g. MuRIL/IndicBERT (research, 6+ h).
 - Add more labelled pairs + edge cases to `test_prototype.py` as the data grows.

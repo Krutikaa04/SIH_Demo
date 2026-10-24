@@ -91,6 +91,31 @@ def flow(round_no):
     _, d, _ = call("/dashboard/summary")
     check("effort-saved counter ticks", d["effort_saved"]["clusters_resolved"] == 1)
 
+    _, pool, _ = call("/cases?page_size=200")
+    free = {}
+    for c in pool["items"]:
+        if not c["overlap"] and c["status"] != "Disposed" and c["institution"]["aicte_id"]:
+            free.setdefault(c["institution"]["aicte_id"], []).append(c)
+    pair = next(([a, b] for cs in free.values() for a in cs for b in cs
+                 if a["bureau"] != b["bureau"] and a["case_id"] < b["case_id"]), None)
+    check("two unlinked open cases exist at one institution", pair is not None)
+    a, b = pair
+    outsider = next(x for x in ("RB", "PGRC", "AB", "LC", "VIG") if x not in (a["bureau"], b["bureau"]))
+    link = {"case_a": a["case_id"], "case_b": b["case_id"], "rationale": "Same grievance in different words"}
+    s, _, _ = call("/links", "POST", link, role=outsider)
+    check("manual link: a Bureau owning neither case is refused (403)", s == 403)
+    s, _, _ = call("/links", "POST", link, role="REGIONAL")
+    check("manual link: Regional Office is refused (403)", s == 403)
+    s, made, _ = call("/links", "POST", link, role=a["bureau"])
+    check("manual link: owning Bureau links the cases", s == 200 and made["created"] and made["pair"]["type"] == "MANUAL")
+    s, again, _ = call("/links", "POST", link)
+    check("manual link is idempotent", s == 200 and not again["created"] and again["pair"]["id"] == made["pair"]["id"])
+    _, ov, _ = call("/overlaps")
+    check("manual link shows up in the overlaps list",
+          any(p["type"] == "MANUAL" for cl in ov["items"] for p in cl["pairs"]))
+    _, room2, _ = call("/rooms", "POST", {"cluster_id": made["cluster_id"]})
+    check("manual link can be opened as a Coordination Room", len(room2["cases"]) == 2 and room2["can_manage_members"])
+
     _, a0, _ = call("/alerts?unread=1")
     t = time.time()
     s, sim, _ = call("/simulate/complaint", "POST", {})

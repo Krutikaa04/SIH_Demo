@@ -11,6 +11,7 @@ export function BreakdownView({ pair, bureauOf, onReviewed }: { pair: any; burea
   const [busy, setBusy] = useState(false)
   const [currentStatus, setCurrentStatus] = useState<string>(pair.status || 'OPEN')
   const [savedRationale, setSavedRationale] = useState<string>(pair.review_rationale || '')
+  const manual = pair.type === 'MANUAL'
 
   useEffect(() => {
     setCurrentStatus(pair.status || 'OPEN')
@@ -44,6 +45,7 @@ export function BreakdownView({ pair, bureauOf, onReviewed }: { pair: any; burea
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <BandBadge band={pair.band} />
+            {manual && <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase text-violet-800">Manual</span>}
             <span className={cx(
               'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase',
               currentStatus === 'CONFIRMED' ? 'bg-emerald-100 text-emerald-800' :
@@ -138,7 +140,7 @@ export function BreakdownView({ pair, bureauOf, onReviewed }: { pair: any; burea
       </div>
 
       <div>
-        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Why these cases were flagged</div>
+        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{manual ? 'Why these cases were linked' : 'Why these cases were flagged'}</div>
         <ul className="space-y-3">
           {pair.breakdown.map((s: any) => {
             const r = s.points / s.max
@@ -155,7 +157,8 @@ export function BreakdownView({ pair, bureauOf, onReviewed }: { pair: any; burea
           })}
         </ul>
         <div className="mt-3 flex items-center justify-between rounded-lg bg-slate-900 px-3.5 py-2.5 text-sm text-white">
-          <span>Total confidence</span><span className="num text-lg font-bold">{Math.round(pair.score)}%</span>
+          {manual ? <span>Linked manually by {pair.review_by || 'an official'} — no automated score</span>
+            : <><span>Total confidence</span><span className="num text-lg font-bold">{Math.round(pair.score)}%</span></>}
         </div>
       </div>
       <button className="text-xs font-medium text-navy-2 hover:underline" onClick={() => setShowText((v) => !v)}>{showText ? 'Hide' : 'Show'} plain-text explanation</button>
@@ -181,7 +184,7 @@ export function ClusterDrawer({ cluster, onClose }: { cluster: any; onClose: () 
           {cluster.pairs.map((p: any, i: number) => (
             <button key={p.id} onClick={() => setSel(i)}
               className={cx('rounded-lg border px-2.5 py-1.5 text-xs font-medium', i === sel ? 'border-navy bg-navy text-white' : 'border-slate-200 text-slate-600 hover:bg-slate-50')}>
-              {bureauOf(p.case_a)} ↔ {bureauOf(p.case_b)} · {Math.round(p.score)}%</button>))}
+              {bureauOf(p.case_a)} ↔ {bureauOf(p.case_b)} · {p.type === 'MANUAL' ? 'manual' : `${Math.round(p.score)}%`}</button>))}
         </div>)}
       <BreakdownView pair={pair} bureauOf={bureauOf} />
       <div className="h-2" />
@@ -233,6 +236,7 @@ export default function Overlaps() {
                     <div className="flex flex-wrap items-center gap-2">
                       {done ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-700">{cl.status}</span> : <BandBadge band={cl.band} />}
                       {cl.status === 'LINKED' && <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-bold text-indigo-700">IN COORDINATION</span>}
+                      {cl.pairs.some((p: any) => p.type === 'MANUAL') && <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-bold text-violet-800" title="Includes a link made by an official">MANUAL</span>}
                       <span className="font-mono text-xs text-slate-400">{cl.cluster_id}</span>
                     </div>
                     <Link to={`/institutions/${cl.institution.aicte_id}`} className="mt-1 block text-[15px] font-semibold text-slate-900 hover:underline">{cl.institution.name}</Link>

@@ -1,16 +1,17 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, ArrowRightLeft, Download, Paperclip, Upload, BadgeCheck, Bot, CheckCheck, FileText, GitMerge, Hash, Lock, MessageSquarePlus, ShieldAlert, ShieldCheck, TrendingUp, UserCheck, UserPlus, Users, Zap, Siren } from 'lucide-react'
+import { ArrowLeft, ArrowRightLeft, Download, Paperclip, Upload, BadgeCheck, Bot, CheckCheck, FileText, GitMerge, Hash, Lock, Link2, MessageSquarePlus, ShieldAlert, ShieldCheck, TrendingUp, Unlink, UserCheck, UserPlus, Users, Zap, Siren } from 'lucide-react'
 import { api, download, post, useApi, useRole } from '../api'
 import { BureauBadge, Card, Countdown, Drawer, ErrorBox, Loading, SlaChip, StatusChip, cx, fmtDate, fmtTs } from '../ui'
 
 const ICONS: any = {
   DOC_ADDED: Paperclip, RECEIVED: FileText, ASSIGNED: UserCheck, REMARK: FileText, TRANSFER: ArrowRightLeft, ESCALATE: TrendingUp,
-  AUTO_ESCALATE: Bot, DISPOSE: CheckCheck, LINKED: GitMerge, COORDINATION: Users,
+  AUTO_ESCALATE: Bot, DISPOSE: CheckCheck, LINKED: GitMerge, COORDINATION: Users, LINKED_MANUAL: Link2, UNLINKED: Unlink,
 }
 const TONE: any = {
   TRANSFER: 'bg-sky-100 text-sky-700', ESCALATE: 'bg-orange-100 text-orange-700', AUTO_ESCALATE: 'bg-orange-100 text-orange-700',
   DISPOSE: 'bg-emerald-100 text-emerald-700', LINKED: 'bg-red-100 text-red-700', COORDINATION: 'bg-red-100 text-red-700',
+  LINKED_MANUAL: 'bg-violet-100 text-violet-700', UNLINKED: 'bg-slate-200 text-slate-700',
 }
 
 function Field({ label, children }: any) {
@@ -33,12 +34,28 @@ export default function CaseDetail() {
   const [err, setErr] = useState('')
   const [ack, setAck] = useState(false)
   const me = useRole()
+  const [linking, setLinking] = useState(false)
+  const [linkFind, setLinkFind] = useState('')
+  const [linkTarget, setLinkTarget] = useState('')
+  const [linkWhy, setLinkWhy] = useState('')
+  const [linkErr, setLinkErr] = useState('')
+  const { data: pool } = useApi<any>(linking && c ? `/cases?institution_id=${encodeURIComponent(c.institution.aicte_id)}&page_size=200` : null, false)
   if (loading && !c) return <Loading />
   if (error && !c) return <ErrorBox msg={error} />
   const ov = c.overlap
   const active = ov && ov.status !== 'RESOLVED' && ov.status !== 'DISMISSED'
   const resolutionLabel = c.resolution.method === 'ID' ? 'matched by AICTE ID' : `matched by name (${Math.round(c.resolution.confidence)}% confidence)`
 
+  const linkNeedle = linkFind.trim().toLowerCase()
+  const linkable = (pool?.items || []).filter((x: any) => x.case_id !== c.case_id &&
+    (!linkNeedle || `${x.case_id} ${x.category} ${x.bureau}`.toLowerCase().includes(linkNeedle)))
+  async function submitLink() {
+    setLinkErr('')
+    try {
+      await post('/links', { case_a: c.case_id, case_b: linkTarget, rationale: linkWhy })
+      setLinking(false); setLinkTarget(''); setLinkWhy(''); setLinkFind('')
+    } catch (e: any) { setLinkErr(e.message) }
+  }
   async function verify() { setVer(await api(`/audit/verify?case_id=${enc}`)) }
   const allowed: string[] = c.allowed_actions || []
   const needsAck = !!c.guard && !!act && c.guard.applies_to.includes(act) && (c.guard.level === 'ack' || (c.guard.level === 'block' && me.role === 'SENIOR'))
@@ -100,6 +117,10 @@ export default function CaseDetail() {
               className={cx('flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition', ok ? a.tone : 'cursor-not-allowed border-slate-100 text-slate-300')}>
               <a.icon size={15} /> {a.label}</button>)
         })}
+        {me.role !== 'REGIONAL' && (
+          <button onClick={() => { setLinking(true); setLinkErr('') }}
+            className="flex items-center gap-1.5 rounded-lg border border-violet-200 px-3 py-1.5 text-sm font-medium text-violet-700 transition hover:bg-violet-50">
+            <Link2 size={15} /> Link to another case…</button>)}
         {allowed.length === 0 && (
           <span className="ml-auto flex items-center gap-1.5 text-xs text-slate-400"><Lock size={13} /> {c.status === 'Disposed' ? 'Case is closed' : 'Read-only for your role'}</span>)}
       </div>
@@ -203,6 +224,38 @@ export default function CaseDetail() {
           </ol>
         </Card>
       </div>
+      <Drawer open={linking} onClose={() => setLinking(false)} width={500}
+        title={<div><div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{c.case_id}</div>
+          <div className="font-bold text-slate-900">Link to another case</div></div>}>
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">Use this when the engine missed a connection. Only cases of {c.institution.name} can be linked; the link is added to both cases' audit trail and starts a coordination issue.</p>
+          <input value={linkFind} onChange={(e) => setLinkFind(e.target.value)} placeholder="Search by case ID, category or Bureau…"
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-navy-2" />
+          <ul className="max-h-64 divide-y divide-slate-100 overflow-auto rounded-lg ring-1 ring-slate-200">
+            {linkable.length === 0 && <li className="p-3 text-xs text-slate-400">{pool ? 'No other cases of this institution match.' : 'Loading…'}</li>}
+            {linkable.map((x: any) => {
+              const already = !!c.overlap && x.overlap?.cluster_id === c.overlap.cluster_id
+              return (
+                <li key={x.case_id}>
+                  <label className={cx('flex cursor-pointer items-center gap-2.5 px-3 py-2 text-sm hover:bg-slate-50', linkTarget === x.case_id && 'bg-violet-50')}>
+                    <input type="radio" name="link-target" checked={linkTarget === x.case_id} onChange={() => setLinkTarget(x.case_id)} />
+                    <BureauBadge code={x.bureau} />
+                    <span className="font-mono text-xs font-semibold text-navy-2">{x.case_id}</span>
+                    <span className="flex-1 truncate text-xs text-slate-500">{x.category}</span>
+                    {already && <span className="rounded bg-indigo-50 px-1.5 text-[10px] font-semibold text-indigo-700">same overlap</span>}
+                    <StatusChip status={x.status} />
+                  </label>
+                </li>)
+            })}
+          </ul>
+          <label className="block"><span className="mb-1 block text-sm font-medium">Why are these cases related? (required)</span>
+            <textarea rows={3} value={linkWhy} onChange={(e) => setLinkWhy(e.target.value)} placeholder="Recorded in both cases' history"
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-navy-2" /></label>
+          {linkErr && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{linkErr}</div>}
+          <button onClick={submitLink} disabled={!linkTarget || !linkWhy.trim()}
+            className="w-full rounded-lg bg-navy py-2.5 text-sm font-semibold text-white hover:bg-navy-2 disabled:cursor-not-allowed disabled:opacity-40">Link cases</button>
+        </div>
+      </Drawer>
       <Drawer open={!!act} onClose={() => setAct(null)} width={460}
         title={<div><div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{c.case_id}</div>
           <div className="font-bold capitalize text-slate-900">{act === 'assign' ? 'Assign officer' : act === 'dispose' ? 'Dispose case' : act}</div></div>}>
