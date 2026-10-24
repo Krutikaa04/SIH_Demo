@@ -1,3 +1,4 @@
+
 """Deterministic synthetic data: ~60 fictional institutions, ~300 cases, planted overlaps and decoys.
 
 All institutions are fictional. Planted scenarios guarantee the demo always shines.
@@ -9,6 +10,7 @@ import shutil
 from datetime import datetime, time, timedelta
 
 from . import db, intel
+from . import sla_rules
 from . import sla as sla_engine
 from .constants import (BUREAU_CATEGORIES, BUREAU_ORDER, BUREAUS, CATEGORY_GROUP, REGION_STATES, SLA_DAYS)
 
@@ -250,204 +252,494 @@ def build_institutions(rng):
 def seed(conn):
     shutil.rmtree(db.ROOT / "data" / "uploads", ignore_errors=True)
     db.reset_schema(conn)
+
     rng = random.Random(42)
     now_dt = datetime.now().replace(microsecond=0)
     today = now_dt.date()
 
     insts = build_institutions(rng)
     by_key = {i["key"]: i for i in insts}
+
     for i in insts:
-        conn.execute("INSERT INTO institutions VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                     (i["aicte_id"], i["name"], i["city"], i["state"], i["region"], i["address"], i["type"],
-                      json.dumps(i["programmes"]), i["est_year"], i["head_name"], i["phone"], i["email"]))
+        conn.execute(
+            "INSERT INTO institutions VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                i["aicte_id"], i["name"], i["city"], i["state"],
+                i["region"], i["address"], i["type"],
+                json.dumps(i["programmes"]), i["est_year"],
+                i["head_name"], i["phone"], i["email"]
+            )
+        )
+
     officers = {}
     for b, lst in OFFICERS.items():
         officers[b] = []
         for n, (name, desig) in enumerate(lst, 1):
             oid = f"OFF-{b}-{n:02d}"
-            conn.execute("INSERT INTO officers VALUES(?,?,?,?,?)", (oid, name, b, desig, n))
-            officers[b].append({"id": oid, "name": name, "designation": desig, "level": n})
-    reg = intel.Registry(conn)
+            conn.execute(
+                "INSERT INTO officers VALUES(?,?,?,?,?)",
+                (oid, name, b, desig, n)
+            )
+            officers[b].append({
+                "id": oid,
+                "name": name,
+                "designation": desig,
+                "level": n
+            })
 
+    reg = intel.Registry(conn)
     specs = []
 
-    def add(bureau, category, text, inst, form, quotes_id, days=None, plan="normal", sev=None, transfers=0):
-        specs.append({"bureau": bureau, "category": category, "text": text, "inst": inst, "form": form,
-                      "quotes_id": quotes_id, "days": days, "plan": plan,
-                      "sev": sev or rng.randint(2, 5), "transfers": transfers})
+    def add(bureau, category, text, inst, form, quotes_id,
+            days=None, plan="normal", sev=None, transfers=0):
+        specs.append({
+            "bureau": bureau,
+            "category": category,
+            "text": text,
+            "inst": inst,
+            "form": form,
+            "quotes_id": quotes_id,
+            "days": days,
+            "plan": plan,
+            "sev": sev or rng.randint(2, 5),
+            "transfers": transfers
+        })
 
-    # 1. planted overlap clusters
+    # 1. Planted overlap clusters
     for key, topic, members in PLANTED:
         for bureau, days, qid, form in members:
             cat, text = TOPIC[(topic, bureau)]
-            add(bureau, cat, text, by_key[key], form, qid, days=days, sev=4 if bureau == "RB" else 3)
-    # 2. simulation targets (staged single open case)
+            add(
+                bureau, cat, text, by_key[key], form, qid,
+                days=days, sev=4 if bureau == "RB" else 3
+            )
+
+    # 2. Simulation targets
     for s in SIM:
         b, topic, days = s["staged"]
         cat, text = TOPIC[(topic, b)]
-        add(b, cat, text, by_key[s["inst"]], "abbr", False, days=days, sev=4)
-    # 3. decoy: same name, different city — must never be linked
-    add("RB", *TOPIC[("faculty", "RB")], by_key[("Coimbatore", 1)], "abbr", False, days=12)
-    add("PGRC", *TOPIC[("faculty", "PGRC")], by_key[("Tirupati", 1)], "abbr", False, days=10)
-    # 4. decoy: old disposed case 14 months ago + a fresh case at the same institution
-    add("PGRC", "Faculty Deficiency", DESC["Faculty Deficiency"][1], by_key[("Mangaluru", 0)], "full", True,
-        days=430, plan="disposed_old")
-    add("RB", "Faculty Deficiency", DESC["Faculty Deficiency"][0], by_key[("Mangaluru", 0)], "abbr", False, days=9)
-    # hero backstory: earlier, long-closed faculty/academic complaints make Pune a repeat offender (risk score)
-    for b, cat, d in (("RB", "Faculty Deficiency", 190), ("RB", "Faculty Deficiency", 330),
-                      ("PGRC", "Academic Quality", 250), ("PGRC", "Academic Quality", 400)):
-        add(b, cat, rng.choice(DESC[cat]), by_key[("Pune", 0)], "abbr", True, days=d, plan="disposed_old", sev=4)
-    # 5. decoy: same institution, same period, unrelated topics
-    add("PGRC", "Fee Overcharging / Refund", DESC["Fee Overcharging / Refund"][0], by_key[("Mysuru", 1)], "full", True, days=7)
-    add("RB", "Infrastructure Deficiency", DESC["Infrastructure Deficiency"][1], by_key[("Mysuru", 1)], "abbr", False, days=5)
+        add(
+            b, cat, text, by_key[s["inst"]],
+            "abbr", False, days=days, sev=4
+        )
 
-    # 6. background cases (avoid accidental same-group collisions so only planted overlaps flag)
-    corpus = sorted({t for lst in DESC.values() for t in lst} | {t for _, t in TOPIC.values()})
+    # 3. Decoy: same name, different city
+    add(
+        "RB", *TOPIC[("faculty", "RB")],
+        by_key[("Coimbatore", 1)], "abbr", False, days=12
+    )
+    add(
+        "PGRC", *TOPIC[("faculty", "PGRC")],
+        by_key[("Tirupati", 1)], "abbr", False, days=10
+    )
+
+    # 4. Old disposed case and a fresh case
+    add(
+        "PGRC", "Faculty Deficiency",
+        DESC["Faculty Deficiency"][1],
+        by_key[("Mangaluru", 0)], "full", True,
+        days=430, plan="disposed_old"
+    )
+    add(
+        "RB", "Faculty Deficiency",
+        DESC["Faculty Deficiency"][0],
+        by_key[("Mangaluru", 0)], "abbr", False, days=9
+    )
+
+    # Hero backstory: earlier faculty / academic complaints
+    for b, cat, d in (
+        ("RB", "Faculty Deficiency", 190),
+        ("RB", "Faculty Deficiency", 330),
+        ("PGRC", "Academic Quality", 250),
+        ("PGRC", "Academic Quality", 400)
+    ):
+        add(
+            b, cat, rng.choice(DESC[cat]),
+            by_key[("Pune", 0)], "abbr", True,
+            days=d, plan="disposed_old", sev=4
+        )
+
+    # 5. Decoy: same institution, unrelated topics
+    add(
+        "PGRC", "Fee Overcharging / Refund",
+        DESC["Fee Overcharging / Refund"][0],
+        by_key[("Mysuru", 1)], "full", True, days=7
+    )
+    add(
+        "RB", "Infrastructure Deficiency",
+        DESC["Infrastructure Deficiency"][1],
+        by_key[("Mysuru", 1)], "abbr", False, days=5
+    )
+
+    # 6. Background cases
+    corpus = sorted(
+        {t for lst in DESC.values() for t in lst}
+        | {t for _, t in TOPIC.values()}
+    )
     tid = {t: f"txt{i}" for i, t in enumerate(corpus)}
     tmodel = intel.TextModel({tid[t]: t for t in corpus})
 
     def eligible(s):
-        return s["plan"] not in ("disposed", "disposed_old") or s["days"] <= 165
+        return (
+            s["plan"] not in ("disposed", "disposed_old")
+            or s["days"] <= 165
+        )
 
     def proxy(s):
-        return {"case_id": tid[s["text"]], "bureau_code": s["bureau"], "institution_id": s["inst"]["aicte_id"],
-                "submitted_institution_name": s["inst"]["name"],
-                "submitted_aicte_id": s["inst"]["aicte_id"] if s["quotes_id"] else None,
-                "resolution_method": "ID" if s["quotes_id"] else "NAME", "resolution_conf": 100.0,
-                "category": s["category"], "description": s["text"],
-                "received_on": str(today - timedelta(days=s["days"]))}
+        return {
+            "case_id": tid[s["text"]],
+            "bureau_code": s["bureau"],
+            "institution_id": s["inst"]["aicte_id"],
+            "submitted_institution_name": s["inst"]["name"],
+            "submitted_aicte_id": (
+                s["inst"]["aicte_id"] if s["quotes_id"] else None
+            ),
+            "resolution_method": (
+                "ID" if s["quotes_id"] else "NAME"
+            ),
+            "resolution_conf": 100.0,
+            "category": s["category"],
+            "description": s["text"],
+            "received_on": str(
+                today - timedelta(days=s["days"])
+            )
+        }
 
     def collides(new):
-        """Exact check with the real scorer: would this background case flag against an existing one?"""
+        """Check if a background case creates an accidental overlap."""
         if not eligible(new):
             return False
+
         for s in specs:
-            if s["inst"] is new["inst"] and eligible(s) and tid[s["text"]] != tid[new["text"]]:
-                if intel.score_pair(proxy(s), proxy(new), tmodel):
+            if (
+                s["inst"] is new["inst"]
+                and eligible(s)
+                and tid[s["text"]] != tid[new["text"]]
+            ):
+                if intel.score_pair(
+                    proxy(s), proxy(new), tmodel
+                ):
                     return True
+
             elif s["inst"] is new["inst"] and eligible(s):
                 return True
+
         return False
 
-    reserved = {by_key[("Pune", 0)]["aicte_id"], by_key[("Coimbatore", 1)]["aicte_id"],
-                by_key[("Tirupati", 1)]["aicte_id"], by_key[("Mangaluru", 0)]["aicte_id"],
-                by_key[("Mysuru", 1)]["aicte_id"]} | {by_key[x["inst"]]["aicte_id"] for x in SIM}
-    weights = [0 if i["aicte_id"] in reserved else i["weight"] for i in insts]
-    # long-stale open cases so region/Bureau/ageing demo queries return meaningful results
+    reserved = {
+        by_key[("Pune", 0)]["aicte_id"],
+        by_key[("Coimbatore", 1)]["aicte_id"],
+        by_key[("Tirupati", 1)]["aicte_id"],
+        by_key[("Mangaluru", 0)]["aicte_id"],
+        by_key[("Mysuru", 1)]["aicte_id"]
+    } | {
+        by_key[x["inst"]]["aicte_id"] for x in SIM
+    }
+
+    weights = [
+        0 if i["aicte_id"] in reserved else i["weight"]
+        for i in insts
+    ]
+
+    # Long-stale open cases
     def stale(bureau, region, n, lo, hi):
-        pool = [i for i in insts if i["region"] == region and i["aicte_id"] not in reserved]
+        pool = [
+            i for i in insts
+            if i["region"] == region
+            and i["aicte_id"] not in reserved
+        ]
         made, tries = 0, 0
+
         while made < n and tries < 400:
             tries += 1
             cat = rng.choice(BUREAU_CATEGORIES[bureau])
             inst = rng.choice(pool)
-            cand = {"bureau": bureau, "category": cat, "text": rng.choice(DESC[cat]), "inst": inst,
-                    "quotes_id": rng.random() < 0.5, "days": rng.randint(lo, hi), "plan": "breached"}
+
+            cand = {
+                "bureau": bureau,
+                "category": cat,
+                "text": rng.choice(DESC[cat]),
+                "inst": inst,
+                "quotes_id": rng.random() < 0.5,
+                "days": rng.randint(lo, hi),
+                "plan": "breached"
+            }
+
             if collides(cand):
                 continue
-            add(bureau, cat, cand["text"], inst, rng.choice(["full", "abbr", "upper"]), cand["quotes_id"],
-                days=cand["days"], plan="breached", transfers=rng.choice([0, 1]))
+
+            add(
+                bureau, cat, cand["text"], inst,
+                rng.choice(["full", "abbr", "upper"]),
+                cand["quotes_id"],
+                days=cand["days"],
+                plan="breached",
+                transfers=rng.choice([0, 1])
+            )
             made += 1
 
     stale("RB", "Western", 16, 35, 80)
     stale("PGRC", "South-Western", 5, 25, 60)
     stale("AB", "Southern", 4, 50, 110)
+
     wbur = [0.37, 0.33, 0.15, 0.08, 0.07]
-    plans = (["disposed"] * 34 + ["nearing"] * 9 + ["breached"] * 15 + ["transferred"] * 8 + ["normal"] * 34)
+    plans = (
+        ["disposed"] * 34
+        + ["nearing"] * 9
+        + ["breached"] * 15
+        + ["transferred"] * 8
+        + ["normal"] * 34
+    )
+
     total = 300
     guard = 0
+
     while len(specs) < total and guard < 20000:
         guard += 1
+
         bureau = rng.choices(BUREAU_ORDER, wbur)[0]
         cat = rng.choice(BUREAU_CATEGORIES[bureau])
         inst = rng.choices(insts, weights)[0]
         plan = rng.choice(plans)
-        sla = SLA_DAYS[bureau]
+
+        # Issue #19: Use the configured category-specific SLA.
+        rule = sla_rules.rule_for(conn, bureau, cat)
+        sla = rule["days"]
+
         if plan == "normal":
-            days = max(1, round(rng.uniform(0.05, 0.7) * sla))
+            days = max(
+                1, round(rng.uniform(0.05, 0.7) * sla)
+            )
         elif plan == "nearing":
-            days = round(rng.uniform(0.78, 0.97) * sla)
+            days = round(
+                rng.uniform(0.78, 0.97) * sla
+            )
         elif plan == "breached":
-            days = round(rng.uniform(1.05, 3.0 if rng.random() < 0.5 else 1.7) * sla)
+            days = round(
+                rng.uniform(
+                    1.05,
+                    3.0 if rng.random() < 0.5 else 1.7
+                ) * sla
+            )
         elif plan == "transferred":
-            days = max(2, round(rng.uniform(0.15, 0.8) * sla))
+            days = max(
+                2, round(rng.uniform(0.15, 0.8) * sla)
+            )
         else:
             days = rng.randint(25, 330)
+
         text = rng.choice(DESC[cat])
-        cand = {"bureau": bureau, "category": cat, "text": text, "inst": inst, "quotes_id": rng.random() < 0.55,
-                "days": days, "plan": plan}
+
+        cand = {
+            "bureau": bureau,
+            "category": cat,
+            "text": text,
+            "inst": inst,
+            "quotes_id": rng.random() < 0.55,
+            "days": days,
+            "plan": plan
+        }
+
         if collides(cand):
             continue
-        add(bureau, cat, text, inst, rng.choice(["full", "abbr", "abbr", "upper", "alias", "typo"]),
-            cand["quotes_id"], days=days, plan=plan,
-            transfers=rng.choice([0, 0, 0, 1, 1, 2]) if plan != "normal" else rng.choice([0, 0, 0, 1]))
-    # a few ping-pong cases (3 transfers)
-    pp = [s for s in specs if s["plan"] in ("breached", "nearing")][:4]
+
+        add(
+            bureau, cat, text, inst,
+            rng.choice([
+                "full", "abbr", "abbr",
+                "upper", "alias", "typo"
+            ]),
+            cand["quotes_id"],
+            days=days,
+            plan=plan,
+            transfers=(
+                rng.choice([0, 0, 0, 1, 1, 2])
+                if plan != "normal"
+                else rng.choice([0, 0, 0, 1])
+            )
+        )
+
+    # Ping-pong cases
+    pp = [
+        s for s in specs
+        if s["plan"] in ("breached", "nearing")
+    ][:4]
+
     for s in pp:
         s["transfers"] = 3
 
-    # ---- insert cases in chronological order so case numbers increase with time ----
+    # Insert cases in chronological order.
     mismatches = 0
     specs.sort(key=lambda s: -(s["days"] or 0))
     counters = {}
+
     for s in specs:
         bureau = s["bureau"]
         received = today - timedelta(days=s["days"])
-        name = name_variant(s["inst"]["name"], s["form"], rng)
-        aid = s["inst"]["aicte_id"] if s["quotes_id"] else None
+        name = name_variant(
+            s["inst"]["name"], s["form"], rng
+        )
+        aid = (
+            s["inst"]["aicte_id"]
+            if s["quotes_id"] else None
+        )
+
         res = reg.resolve(name, aid)
-        if not res or res["institution_id"] != s["inst"]["aicte_id"]:
+
+        if (
+            not res
+            or res["institution_id"] != s["inst"]["aicte_id"]
+        ):
             mismatches += 1
-            res = {"institution_id": s["inst"]["aicte_id"], "method": "NAME", "confidence": 90.0}
+            res = {
+                "institution_id": s["inst"]["aicte_id"],
+                "method": "NAME",
+                "confidence": 90.0
+            }
+
         key = (bureau, received.year)
         counters[key] = counters.get(key, 0) + 1
-        case_id = f"{bureau}/{received.year}/{counters[key]:05d}"
-        sla = SLA_DAYS[bureau]
-        _insert_with_history(conn, rng, s, case_id, received, name, aid, res, sla, officers, now_dt)
-    if mismatches:
-        print(f"[seed] note: {mismatches} case(s) fell back to intended institution (resolver ambiguity)")
+        case_id = (
+            f"{bureau}/{received.year}/{counters[key]:05d}"
+        )
 
-    # ---- run the real overlap engine over everything ----
+        # Issue #19: Resolve the rule for this exact category.
+        rule = sla_rules.rule_for(
+            conn, bureau, s["category"]
+        )
+
+        _insert_with_history(
+            conn, rng, s, case_id, received,
+            name, aid, res, rule["days"],
+            officers, now_dt, rule=rule
+        )
+
+    if mismatches:
+        print(
+            f"[seed] note: {mismatches} case(s) fell back "
+            "to intended institution (resolver ambiguity)"
+        )
+
+    # Run the real overlap engine.
     created = intel.detect(conn)
-    # alerts: one per overlap cluster (best pair), plus SLA alerts
     best = {}
+
     for p in created:
-        cur = best.get(p["institution_id"])
-        c = db.one(conn, "SELECT cluster_id FROM overlap_pairs WHERE id=?", (p["id"],))
+        c = db.one(
+            conn,
+            "SELECT cluster_id FROM overlap_pairs WHERE id=?",
+            (p["id"],)
+        )
         key = c["cluster_id"]
-        if key not in best or p["score"] > best[key]["score"]:
+
+        if (
+            key not in best
+            or p["score"] > best[key]["score"]
+        ):
             best[key] = {**p, "cluster_id": key}
-    for n, (cid, p) in enumerate(sorted(best.items(), key=lambda x: -x[1]["score"])):
+
+    for n, (cid, p) in enumerate(
+        sorted(
+            best.items(),
+            key=lambda x: -x[1]["score"]
+        )
+    ):
         ts = now_dt - timedelta(hours=2 + n * 5)
-        a = db.one(conn, "SELECT bureau_code FROM cases WHERE case_id=?", (p["case_a"],))
-        b = db.one(conn, "SELECT bureau_code FROM cases WHERE case_id=?", (p["case_b"],))
-        sev = "HIGH" if p["band"] == "HIGH" else "MEDIUM"
-        conn.execute("INSERT INTO alerts(type,severity,case_id,institution_id,pair_id,cluster_id,message,created_at,is_read)"
-                     " VALUES('OVERLAP',?,?,?,?,?,?,?,?)",
-                     (sev, p["case_a"], p["institution_id"], p["id"], cid, p["headline"], db.iso(ts), 1 if n > 5 else 0))
-    overdue = db.rows(conn, "SELECT case_id,institution_id,due_date,bureau_code FROM cases "
-                            "WHERE status!='Disposed' AND due_date<? ORDER BY due_date LIMIT 8", (str(today),))
-    for n, c in enumerate(overdue):
-        conn.execute("INSERT INTO alerts(type,severity,case_id,institution_id,message,created_at,is_read) "
-                     "VALUES('SLA_BREACH','HIGH',?,?,?,?,?)",
-                     (c["case_id"], c["institution_id"], f"{c['case_id']} is beyond its prescribed timeline "
-                      f"(due {c['due_date']})", db.iso(now_dt - timedelta(hours=3 + n * 9)), 1))
-    near = db.rows(conn, "SELECT case_id,institution_id,due_date FROM cases WHERE status!='Disposed' AND due_date>=? "
-                         "AND (julianday(?)-julianday(received_on))*1.0/sla_days>=0.75 ORDER BY due_date LIMIT 6",
-                   (str(today), str(today)))
-    for n, c in enumerate(near):
-        conn.execute("INSERT INTO alerts(type,severity,case_id,institution_id,message,created_at,is_read) "
-                     "VALUES('SLA_NEAR','MEDIUM',?,?,?,?,?)",
-                     (c["case_id"], c["institution_id"], f"{c['case_id']} is nearing its timeline (due {c['due_date']})",
-                      db.iso(now_dt - timedelta(hours=5 + n * 8)), 1))
+
+        sev = (
+            "HIGH" if p["band"] == "HIGH"
+            else "MEDIUM"
+        )
+
+        conn.execute(
+            "INSERT INTO alerts(type,severity,case_id,institution_id,pair_id,cluster_id,message,created_at,is_read)"
+            " VALUES('OVERLAP',?,?,?,?,?,?,?,?)",
+            (
+                sev, p["case_a"], p["institution_id"],
+                p["id"], cid, p["headline"],
+                db.iso(ts), 1 if n > 5 else 0
+            )
+        )
+
+    # ---------------------------------------------------
+    # Issue #19: Working-day-aware seeded SLA alerts
+    # ---------------------------------------------------
+
+    holidays = sla_rules.holiday_dates(conn)
+
+    open_cases = db.rows(
+        conn,
+        "SELECT * FROM cases WHERE status!='Disposed'"
+    )
+
+    overdue = []
+    near = []
+
+    for case in open_cases:
+        progress = sla_rules.case_progress(
+            case, today, holidays
+        )
+
+        elapsed = progress["age_days"] / progress["days"]
+        warning = progress["warn_pct"] / 100
+
+        if elapsed >= 1.0:
+            overdue.append(case)
+        elif elapsed >= warning:
+            near.append(case)
+
+    overdue.sort(key=lambda c: c["due_date"])
+    near.sort(key=lambda c: c["due_date"])
+
+    for n, c in enumerate(overdue[:8]):
+        conn.execute(
+            "INSERT INTO alerts(type,severity,case_id,institution_id,message,created_at,is_read) "
+            "VALUES('SLA_BREACH','HIGH',?,?,?,?,?)",
+            (
+                c["case_id"],
+                c["institution_id"],
+                (
+                    f"{c['case_id']} is beyond its prescribed "
+                    f"timeline (due {c['due_date']})"
+                ),
+                db.iso(
+                    now_dt - timedelta(hours=3 + n * 9)
+                ),
+                1
+            )
+        )
+
+    for n, c in enumerate(near[:6]):
+        conn.execute(
+            "INSERT INTO alerts(type,severity,case_id,institution_id,message,created_at,is_read) "
+            "VALUES('SLA_NEAR','MEDIUM',?,?,?,?,?)",
+            (
+                c["case_id"],
+                c["institution_id"],
+                (
+                    f"{c['case_id']} is nearing its "
+                    f"timeline (due {c['due_date']})"
+                ),
+                db.iso(
+                    now_dt - timedelta(hours=5 + n * 8)
+                ),
+                1
+            )
+        )
+
     _seed_documents(conn, rng, now_dt)
     sla_engine.init_state(conn)
+
     db.set_setting(conn, "sim_counter", "0")
     conn.commit()
 
 
-def _insert_with_history(conn, rng, s, case_id, received, name, aid, res, sla, officers, now_dt):
+
+def _insert_with_history(conn, rng, s, case_id, received, name, aid, res, sla, officers, now_dt, rule=None):
     bureau = s["bureau"]
+    rule = rule or sla_rules.rule_for(conn, bureau, s["category"])
+    holidays = sla_rules.holiday_dates(conn) if rule["use_working_days"] else None
+    due = sla_rules.due_date(received, rule, holidays)
     plan = s["plan"]
     t0 = datetime.combine(received, time(10, 0)) + timedelta(minutes=rng.randint(0, 300))
     disposed = plan in ("disposed", "disposed_old")
@@ -547,12 +839,14 @@ def _insert_with_history(conn, rng, s, case_id, received, name, aid, res, sla, o
         "INSERT INTO cases(case_id,reference_no,institution_id,submitted_institution_name,submitted_aicte_id,"
         "resolution_method,resolution_conf,source,received_on,category,category_group,severity,description,status,"
         "origin_bureau,bureau_code,assigned_officer_id,last_action,last_action_at,next_action,sla_days,due_date,"
-        "escalation_level,transfer_count,disposed_on,outcome) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "escalation_level,transfer_count,disposed_on,outcome,sla_use_working_days,sla_warn_pct) "
+        "VALUES(" + ",".join(["?"] * 28) + ")",
         (case_id, f"{bureau}-{rng.randint(1000, 9999)}/{received.year}", res["institution_id"], name, aid,
          res["method"], res["confidence"], rng.choice(SOURCES), str(received), s["category"],
          CATEGORY_GROUP[s["category"]], s["sev"], s["text"], status, bureau, cur, off["id"], last_label,
-         db.iso(last_ts), nxt, sla, str(received + timedelta(days=sla)), esc_level, transfers,
-         str(disposed_on) if disposed_on else None, outcome))
+         db.iso(last_ts), nxt, sla, str(due), esc_level, transfers,
+         str(disposed_on) if disposed_on else None, outcome,
+         int(rule["use_working_days"]), rule["warn_pct"]))
     for ts, kind, actor, aid_, abureau, fb, tb, remarks in sorted(events, key=lambda e: e[0]):
         db.append_action(conn, case_id, db.iso(ts), aid_, actor, abureau, kind, fb, tb, remarks)
 

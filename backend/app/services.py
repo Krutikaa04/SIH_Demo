@@ -3,7 +3,7 @@ import json
 import random
 from datetime import datetime, timedelta
 
-from . import db, events, intel, seed
+from . import db, events, intel, seed, sla_rules
 from .constants import BUREAUS, CATEGORY_GROUP, HEADLINE_HIGH, OPEN_STATUSES, SLA_DAYS
 
 PERSONA = ("OFF-SM-01", "Competent Authority", "SENIOR")  # P0 has no login; one acting persona
@@ -17,24 +17,13 @@ LEFT JOIN officers o ON o.id = c.assigned_officer_id
 """
 
 
-def sla_info(c, today):
-    recv = datetime.strptime(c["received_on"], "%Y-%m-%d").date()
-    sla = c["sla_days"]
-    age = (today - recv).days
-    pct = round(age / sla * 100)
-    if c["status"] == "Disposed":
-        state = "CLOSED"
-    elif pct >= 100:
-        state = "BREACHED"
-    elif pct >= 75:
-        state = "NEARING"
-    else:
-        state = "ON_TRACK"
-    return {"days": sla, "age_days": age, "elapsed_pct": pct, "remaining_days": sla - age, "state": state}
+def sla_info(c, today, holidays=None):
+    """Report progress using the SLA snapshot saved on this case."""
+    return sla_rules.case_progress(c, today, holidays)
 
 
 def case_where(today, q="", bureau="", region="", category="", status="", institution_id="", date_from="",
-               date_to="", overdue=0, overlap=0, nearing=0, age_gt=0, age_lt=0):
+               date_to="", overdue=0, overlap=0, nearing=0, age_gt=0, age_lt=0, conn=None):
     """Shared filter builder for the case list, NL search and CSV export."""
     where, params = [], []
     if q:
@@ -61,8 +50,24 @@ def case_where(today, q="", bureau="", region="", category="", status="", instit
     if overdue:
         where.append("c.status!='Disposed' AND c.due_date<?"); params.append(str(today))
     if nearing:
-        where.append("c.status!='Disposed' AND c.due_date>=? AND (julianday(?)-julianday(c.received_on))*1.0/c.sla_days>=0.75")
-        params += [str(today), str(today)]
+        # The optional connection enables exact, holiday-aware filtering.
+        # Existing callers without a connection retain calendar-day SQL behaviour.
+        if conn is not None:
+            holidays = sla_rules.holiday_dates(conn)
+            matching = [c["case_id"] for c in db.rows(
+                conn, "SELECT case_id,received_on,sla_days,sla_use_working_days,"
+                      "sla_warn_pct,status FROM cases WHERE status!='Disposed' AND due_date>=?",
+                (str(today),))
+                if sla_rules.case_progress(c, today, holidays)["state"] == "NEARING"]
+            if matching:
+                where.append("c.case_id IN (" + ",".join("?" * len(matching)) + ")")
+                params.extend(matching)
+            else:
+                where.append("1=0")
+        else:
+            where.append("c.status!='Disposed' AND c.due_date>=? AND "
+                         "(julianday(?)-julianday(c.received_on))*100.0/c.sla_days>=c.sla_warn_pct")
+            params += [str(today), str(today)]
     if overlap:
         where.append("c.cluster_id IS NOT NULL")
     if age_gt:
@@ -92,7 +97,7 @@ def cluster_map(conn):
     return out
 
 
-def serialize_case(c, today, clusters, bureau_of=None):
+def serialize_case(c, today, clusters, bureau_of=None, holidays=None):
     cl = clusters.get(c["cluster_id"]) if c.get("cluster_id") else None
     overlap = None
     if cl:
@@ -111,7 +116,7 @@ def serialize_case(c, today, clusters, bureau_of=None):
         "assigned_officer": {"id": c["assigned_officer_id"], "name": c["off_name"], "designation": c["off_desig"]},
         "last_action": c["last_action"], "last_action_at": c["last_action_at"], "next_action": c["next_action"],
         "expected_disposal": c["due_date"], "disposed_on": c["disposed_on"], "outcome": c["outcome"],
-        "sla": sla_info(c, today), "escalation_level": c["escalation_level"], "transfer_count": c["transfer_count"],
+        "sla": sla_info(c, today, holidays), "escalation_level": c["escalation_level"], "transfer_count": c["transfer_count"],
         "overlap": overlap,
     }
 
@@ -127,7 +132,8 @@ def case_summaries(conn, case_ids):
     rows = db.rows(conn, CASE_SELECT + " WHERE c.case_id IN (%s) ORDER BY c.received_on" % ",".join("?" * len(case_ids)),
                    tuple(case_ids))
     cl, bl = cluster_map(conn), bureau_lookup(conn)
-    return [serialize_case(r, today, cl, bl) for r in rows]
+    holidays = sla_rules.holiday_dates(conn)
+    return [serialize_case(r, today, cl, bl, holidays) for r in rows]
 
 
 def history_for(conn, case_id):
@@ -184,11 +190,43 @@ def clusters_view(conn, only_active=True):
 
 # ---- write flows ---------------------------------------------------------------------
 
+
+
 def next_case_number(conn, bureau, year):
     prefix = f"{bureau}/{year}/"
-    r = conn.execute("SELECT MAX(case_id) FROM cases WHERE case_id LIKE ?", (prefix + "%",)).fetchone()[0]
-    n = int(r.split("/")[-1]) + 1 if r else 1
-    return f"{prefix}{n:05d}"
+
+    # Preserve the highest case number already present in the database.
+    existing = conn.execute(
+        "SELECT MAX(CAST(SUBSTR(case_id, ?) AS INTEGER)) "
+        "FROM cases WHERE case_id LIKE ?",
+        (len(prefix) + 1, prefix + "%"),
+    ).fetchone()[0] or 0
+
+    # Initialize or synchronize the counter without moving it backwards.
+    conn.execute(
+        """
+        INSERT INTO case_number_counters(bureau, year, value)
+        VALUES (?, ?, ?)
+        ON CONFLICT(bureau, year) DO UPDATE
+        SET value = MAX(case_number_counters.value, excluded.value)
+        """,
+        (bureau, year, existing),
+    )
+
+    # Atomically allocate the next number.
+    row = conn.execute(
+        """
+        INSERT INTO case_number_counters(bureau, year, value)
+        VALUES (?, ?, 1)
+        ON CONFLICT(bureau, year) DO UPDATE
+        SET value = case_number_counters.value + 1
+        RETURNING value
+        """,
+        (bureau, year),
+    ).fetchone()
+
+    return f"{prefix}{int(row['value']):05d}"
+
 
 
 def create_alert(conn, type_, severity, message, case_id=None, institution_id=None, pair_id=None,
@@ -312,18 +350,25 @@ def register_complaint(conn, d, ctx=None, notify=True, reg=None):
               "GROUP BY assigned_officer_id", (bureau,))}
     officers = db.rows(conn, "SELECT * FROM officers WHERE bureau_code=? AND level<=2 ORDER BY level", (bureau,))
     off = min(officers, key=lambda o: load.get(o["id"], 0))  # least-loaded desk officer
-    sla = SLA_DAYS[bureau]
+    rule = sla_rules.rule_for(conn, bureau, d["category"])
+    sla = rule["days"]
     rdate = datetime.strptime(d["received_on"], "%Y-%m-%d").date()
+    due = sla_rules.due_date(
+        rdate, rule,
+        sla_rules.holiday_dates(conn) if rule["use_working_days"] else None,
+    )
     conn.execute(
         "INSERT INTO cases(case_id,reference_no,institution_id,submitted_institution_name,submitted_aicte_id,"
         "resolution_method,resolution_conf,source,received_on,category,category_group,severity,description,status,"
         "origin_bureau,bureau_code,assigned_officer_id,last_action,last_action_at,next_action,sla_days,due_date,"
-        "escalation_level,transfer_count) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0)",
+        "escalation_level,transfer_count,sla_use_working_days,sla_warn_pct) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?)",
         (case_id, f"{bureau}-{random.Random(case_id).randint(1000, 9999)}/{now_dt.year}", res["institution_id"],
          d["institution_name"] or reg.by_id[res["institution_id"]]["name"], d["aicte_id"], res["method"],
          res["confidence"], d["source"], d["received_on"], d["category"], CATEGORY_GROUP[d["category"]],
          d["severity"], d["description"], "Received", bureau, bureau, off["id"], "Complaint received",
-         db.iso(now_dt), "Assign and scrutinise", sla, str(rdate + timedelta(days=sla))))
+         db.iso(now_dt), "Assign and scrutinise", sla, str(due),
+         int(rule["use_working_days"]), rule["warn_pct"]))
     by = "" if P[0] == "SYS" else f"; registered by {P[1]}"
     db.append_action(conn, case_id, db.iso(now_dt), "SYS", "Diary Section", bureau, "RECEIVED", None, None,
                      f"Complaint received via {d['source']} and diarised as {case_id}{by}")
@@ -453,19 +498,32 @@ def import_complaints(conn, csv_text, ctx, dry_run=True):
 
 def simulate_complaint(conn, scenario=None):
     """File a scripted complaint through the same pipeline the Register form uses."""
-    n = int(db.get_setting(conn, "sim_counter", "0"))
     if scenario:
         n = int(scenario) - 1
+    else:
+        n = db.next_counter(conn, "sim_counter") - 1
+
     spec = seed.simulate_spec(conn, n)
-    db.set_setting(conn, "sim_counter", n + 1)
-    d = {"institution_name": spec["name"], "institution_id": None, "aicte_id": None, "bureau": spec["bureau"],
-         "category": spec["category"], "description": spec["text"], "severity": 4, "source": "CPGRAMS",
-         "received_on": str(db.now(conn).date())}
+
+    d = {
+        "institution_name": spec["name"],
+        "institution_id": None,
+        "aicte_id": None,
+        "bureau": spec["bureau"],
+        "category": spec["category"],
+        "description": spec["text"],
+        "severity": 4,
+        "source": "CPGRAMS",
+        "received_on": str(db.now(conn).date()),
+    }
+
     try:
         out = register_complaint(conn, d)
-    except Unresolved:  # scripted fallback: the demo must never fail on a garbled name
+    except Unresolved:
+        # Scripted fallback: the demo must never fail on a garbled name.
         d["institution_id"] = spec["institution"]["aicte_id"]
         out = register_complaint(conn, d)
+
     return {"case": out["case"], "overlaps": out["overlaps"]}
 
 

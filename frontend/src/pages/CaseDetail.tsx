@@ -85,7 +85,9 @@ export default function CaseDetail() {
         </div>
         <div className="flex items-center gap-4 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-slate-200/70">
           <div><div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Prescribed timeline</div>
-            <div className="num text-sm text-slate-600">{c.sla.days} days · due {fmtDate(c.expected_disposal)}</div></div>
+            <div className="num text-sm text-slate-600">
+  {c.sla.days} {c.sla.use_working_days ? 'working days' : 'calendar days'} · due {fmtDate(c.expected_disposal)}
+</div></div>
           <SlaChip sla={c.sla} />
           {clock && <div className="border-l border-slate-200 pl-4"><Countdown dueDate={c.expected_disposal} serverNow={clock.now} closed={c.sla.state === 'CLOSED'} /></div>}
         </div>
