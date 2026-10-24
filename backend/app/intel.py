@@ -330,7 +330,7 @@ def preview_pairs(conn, draft):
 def recluster(conn, institution_id):
     """Union-find over the institution's active pairs; assign stable cluster ids."""
     pairs = db.rows(conn, "SELECT id,case_a,case_b,cluster_id FROM overlap_pairs "
-                          "WHERE institution_id=? AND status!='DISMISSED'", (institution_id,))
+                          "WHERE institution_id=? AND status NOT IN ('DISMISSED','REJECTED')", (institution_id,))
     parent = {}
 
     def find(x):
@@ -356,3 +356,18 @@ def recluster(conn, institution_id):
                      (cid, *[p["id"] for p in plist]))
         conn.execute("UPDATE cases SET cluster_id=? WHERE case_id IN (%s)" % ",".join("?" * len(cases)),
                      (cid, *cases))
+
+
+def extract_entities(text: str) -> dict:
+    """Extracts financial amounts, circular numbers, and roll/registration numbers from text."""
+    if not text:
+        return {"amounts": [], "circulars": [], "roll_numbers": []}
+    amounts = re.findall(r"(?:₹|Rs\.?|INR)\s*[\d,]+|(?:[\d,]+)\s*(?:rupees|lakh|crore)", text, re.IGNORECASE)
+    circulars = re.findall(r"(?:circular|ref|notification|order|file)\s*(?:no\.?|#)?\s*[\w\-/]+", text, re.IGNORECASE)
+    rolls = re.findall(r"(?:roll|reg|enrolment|enrollment|hall[- ]?ticket)\s*(?:no\.?|#)?\s*[\w\-]+", text, re.IGNORECASE)
+    return {
+        "amounts": sorted(set(amounts)),
+        "circulars": sorted(set(circulars)),
+        "roll_numbers": sorted(set(rolls))
+    }
+
