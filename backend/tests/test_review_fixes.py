@@ -8,7 +8,9 @@ import unittest
 import pytest
 from fastapi import HTTPException
 
-from app import db, main, roles, seed, services
+from app import db, roles, seed, services
+
+from app.routers import admin, cases, dashboard, overlaps, rooms
 
 HERO = "1-4520311"
 
@@ -29,7 +31,7 @@ class TestReviewAndRestore(unittest.TestCase):
         return cl
 
     def _review(self, pair_id, decision, role=None):
-        return main.review_overlap_pair(pair_id, {"decision": decision, "rationale": "Checked the dockets"},
+        return overlaps.review_overlap_pair(pair_id, {"decision": decision, "rationale": "Checked the dockets"},
                                         self.conn, role or self.sm)
 
     def _guard(self, case_id, role):
@@ -46,7 +48,7 @@ class TestReviewAndRestore(unittest.TestCase):
         self.assertEqual(active[0]["status"], "LINKED")
         g = self._guard(case, None)
         self.assertEqual((g["level"], g["code"]), ("ack", "OPEN_OVERLAP"))
-        self.assertEqual(main.dashboard(self.conn, self.sm)["overlap"]["open_clusters"], 11)
+        self.assertEqual(dashboard.dashboard(self.conn, self.sm)["overlap"]["open_clusters"], 11)
 
     def test_deferred_pairs_stay_open(self):
         cl = self._hero()
@@ -81,15 +83,15 @@ class TestReviewAndRestore(unittest.TestCase):
         cl = self._hero()
         rejected = cl["pairs"][0]["id"]
         self._review(rejected, "REJECTED")
-        room = main.create_room({"cluster_id": cl["cluster_id"]}, self.conn, self.sm)
-        main.decide(room["id"], {"outcome": "RESOLVE", "lead_bureau": room["lead_bureau"], "note": "ok"}, self.conn, self.sm)
+        room = rooms.create_room({"cluster_id": cl["cluster_id"]}, self.conn, self.sm)
+        rooms.decide(room["id"], {"outcome": "RESOLVE", "lead_bureau": room["lead_bureau"], "note": "ok"}, self.conn, self.sm)
         self.assertEqual(db.one(self.conn, "SELECT status FROM overlap_pairs WHERE id=?", (rejected,))["status"], "REJECTED")
 
     def test_review_needs_a_rationale_and_a_non_regional_role(self):
         cl = self._hero()
         pid = cl["pairs"][0]["id"]
         with self.assertRaises(HTTPException) as cm:
-            main.review_overlap_pair(pid, {"decision": "CONFIRMED", "rationale": "  "}, self.conn, self.sm)
+            overlaps.review_overlap_pair(pid, {"decision": "CONFIRMED", "rationale": "  "}, self.conn, self.sm)
         self.assertEqual(cm.exception.status_code, 422)
         with self.assertRaises(HTTPException) as cm:
             self._review(pid, "CONFIRMED", role=_ctx("REGIONAL", "Western"))
@@ -105,18 +107,18 @@ class TestReviewAndRestore(unittest.TestCase):
 
     def test_double_tamper_then_restore_repairs_the_chain(self):
         self.assertTrue(db.verify_chain(self.conn)["ok"])
-        main.tamper({}, self.conn)
-        main.tamper({}, self.conn)  # a second click used to overwrite the pristine backup
+        admin.tamper({}, self.conn)
+        admin.tamper({}, self.conn)  # a second click used to overwrite the pristine backup
         self.assertFalse(db.verify_chain(self.conn)["ok"])
-        out = main.restore_tamper(self.conn)
+        out = admin.restore_tamper(self.conn)
         self.assertTrue(out["restored"])
         self.assertTrue(out["verification"]["ok"])
 
     def test_tampering_two_different_records_restores_both(self):
-        main.tamper({"case_id": self._hero()["cases"][0]["case_id"], "seq": 2}, self.conn)
-        main.tamper({"case_id": self._hero()["cases"][1]["case_id"], "seq": 2}, self.conn)
+        admin.tamper({"case_id": self._hero()["cases"][0]["case_id"], "seq": 2}, self.conn)
+        admin.tamper({"case_id": self._hero()["cases"][1]["case_id"], "seq": 2}, self.conn)
         self.assertFalse(db.verify_chain(self.conn)["ok"])
-        self.assertTrue(main.restore_tamper(self.conn)["verification"]["ok"])
+        self.assertTrue(admin.restore_tamper(self.conn)["verification"]["ok"])
 
 
 if __name__ == "__main__":

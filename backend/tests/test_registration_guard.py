@@ -8,7 +8,9 @@ import unittest
 import pytest
 from fastapi import HTTPException
 
-from app import db, intel, main, roles, seed, services
+from app import db, intel, roles, seed, services
+
+from app.routers import admin, cases, dashboard, overlaps, rooms
 
 HERO = "1-4520311"
 TEXT = "Students say regular teachers are missing for months and the faculty strength is far below norms."
@@ -96,27 +98,27 @@ class TestRegistrationAndGuard(unittest.TestCase):
         g = services.coordination_guard(self.conn, db.one(self.conn, "SELECT * FROM cases WHERE case_id=?", (cid,)))
         self.assertEqual((g["level"], g["code"]), ("ack", "OPEN_OVERLAP"))
         with self.assertRaises(HTTPException) as cm:
-            main.case_action(cid, {"type": "transfer", "to_bureau": "AB", "remarks": "x"}, self.conn, self.pg)
+            cases.case_action(cid, {"type": "transfer", "to_bureau": "AB", "remarks": "x"}, self.conn, self.pg)
         self.assertEqual(cm.exception.status_code, 409)
-        main.case_action(cid, {"type": "remark", "remarks": "Remarks never need acknowledgement"}, self.conn, self.pg)
+        cases.case_action(cid, {"type": "remark", "remarks": "Remarks never need acknowledgement"}, self.conn, self.pg)
 
         # merge the cluster under RB
-        room = main.create_room({"cluster_id": cluster}, self.conn, self.sm)
-        main.decide(room["id"], {"outcome": "MERGE", "lead_bureau": "RB", "note": "RB leads"}, self.conn, self.sm)
+        room = rooms.create_room({"cluster_id": cluster}, self.conn, self.sm)
+        rooms.decide(room["id"], {"outcome": "MERGE", "lead_bureau": "RB", "note": "RB leads"}, self.conn, self.sm)
         g = services.coordination_guard(self.conn, db.one(self.conn, "SELECT * FROM cases WHERE case_id=?", (cid,)))
         self.assertEqual((g["level"], g["code"]), ("block", "FOLLOWS_LEAD"))
 
         # follower (PGRC) is blocked but may still remark; Senior must acknowledge
         for kind in ("transfer", "escalate", "dispose"):
             with self.assertRaises(HTTPException) as cm:
-                main.case_action(cid, {"type": kind, "to_bureau": "AB", "remarks": "x"}, self.conn, self.pg)
+                cases.case_action(cid, {"type": kind, "to_bureau": "AB", "remarks": "x"}, self.conn, self.pg)
             self.assertEqual(cm.exception.status_code, 403, kind)
-        main.case_action(cid, {"type": "remark", "remarks": "Statements forwarded to the lead"}, self.conn, self.pg)
-        self.assertNotIn("escalate", main.get_case(cid, self.conn, self.pg)["allowed_actions"])
+        cases.case_action(cid, {"type": "remark", "remarks": "Statements forwarded to the lead"}, self.conn, self.pg)
+        self.assertNotIn("escalate", cases.get_case(cid, self.conn, self.pg)["allowed_actions"])
         with self.assertRaises(HTTPException) as cm:
-            main.case_action(cid, {"type": "escalate", "remarks": "x"}, self.conn, self.sm)
+            cases.case_action(cid, {"type": "escalate", "remarks": "x"}, self.conn, self.sm)
         self.assertEqual(cm.exception.status_code, 409)
-        res = main.case_action(cid, {"type": "escalate", "remarks": "Competent Authority intervenes",
+        res = cases.case_action(cid, {"type": "escalate", "remarks": "Competent Authority intervenes",
                                      "acknowledge_overlap": True}, self.conn, self.sm)
         self.assertEqual(res["status"], "Escalated")
         self.assertIn("acknowledged", services.history_for(self.conn, cid)[-1]["remarks"])
@@ -126,7 +128,7 @@ class TestRegistrationAndGuard(unittest.TestCase):
         g = services.coordination_guard(self.conn, lead)
         self.assertEqual(g["code"], "LEAD_WITH_OPEN_FOLLOWERS")
         with self.assertRaises(HTTPException) as cm:
-            main.case_action(lead["case_id"], {"type": "dispose", "remarks": "Closed"}, self.conn, self.rb)
+            cases.case_action(lead["case_id"], {"type": "dispose", "remarks": "Closed"}, self.conn, self.rb)
         self.assertEqual(cm.exception.status_code, 409)
         self.assertTrue(db.verify_chain(self.conn)["ok"])
 

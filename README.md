@@ -80,3 +80,7 @@ Tests seed one temporary template and copy it for every test; they never use the
 DB. Fixtures are `db_path`, `conn`, `client`, and `as_role(role, region=None)`.
 Use `db.configure(path)` to override the database location, or `db.configure()` to
 return to the `AICTE_DB` environment setting, resolved when a connection is opened.
+
+API routes live in `backend/app/routers/`, grouped by domain. `backend/app/main.py`
+only wires the routers, background SLA task, middleware and static UI. Register
+specific case subroutes before the greedy case detail route, and the SPA fallback last.

@@ -415,3 +415,13 @@ session-seeded template, plus `conn`, `client` and `as_role` fixtures. Test modu
 must not set `AICTE_DB` at import time. `db.configure(path)` overrides the DB path;
 `db.configure()` restores environment-based configuration. Mark expensive workflow
 tests with `pytest.mark.slow` when appropriate.
+
+## Backend router layout
+
+`app.main:app` remains the server entry point. Domain handlers now live under
+`backend/app/routers/`: `meta`, `cases`, `institutions`, `dashboard`, `overlaps`,
+`rooms`, `alerts`, `intel_views`, `admin`, and `events`. Tests import handlers from
+those modules. `extras.router` is registered first for document routes; case history
+and actions precede case detail; the SPA fallback is last. Public URLs, operation
+IDs, dependency injection and response shapes are preserved. The route inventory
+regression test guards against accidental method/path changes.
