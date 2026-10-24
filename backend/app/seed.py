@@ -386,6 +386,14 @@ def seed(conn):
     for s in pp:
         s["transfers"] = 3
 
+    entity_examples = {(("Kochi", 0), "RB", 19): TOPIC[("unapproved", "RB")][1],
+                       (("Kochi", 0), "LC", 7): TOPIC[("unapproved", "LC")][1],
+                       (("Mysuru", 1), "PGRC", 7): DESC["Fee Overcharging / Refund"][0],
+                       (("Mysuru", 1), "RB", 5): DESC["Infrastructure Deficiency"][1]}
+    for s in specs:
+        if entity_examples.get((s["inst"]["key"], s["bureau"], s["days"])) == s["text"]:
+            s["text"] = s["text"].rstrip(".") + " (₹45,000)."
+
     # ---- insert cases in chronological order so case numbers increase with time ----
     mismatches = 0
     specs.sort(key=lambda s: -(s["days"] or 0))
