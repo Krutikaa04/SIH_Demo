@@ -3,7 +3,7 @@ import csv
 import io
 from datetime import date, datetime, timedelta
 
-from . import db, risk, services
+from . import coordination_metrics, db, risk, services
 from .constants import BUREAUS, REGION_STATES, STATUSES
 
 KINDS = {
@@ -15,6 +15,7 @@ KINDS = {
     "disposal": "Disposal rate & performance",
     "overlaps": "Overlapping / duplicate cases",
     "periodic": "Monthly / quarterly performance",
+    "coordination": "Recorded coordination outcomes",
 }
 
 
@@ -28,6 +29,8 @@ def _load(conn, ctx, region=None, bureau=None, date_from=None, date_to=None):
 
     effective_region = region
     if ctx.role == "REGIONAL":
+        if not ctx.region or ctx.region not in REGION_STATES:
+            raise ValueError("A valid region is required for a Regional Office report")
         if region and region != ctx.region:
             raise ValueError(f"Access denied: cannot request region '{region}' while in role REGIONAL ({ctx.region})")
         effective_region = ctx.region
@@ -98,10 +101,14 @@ def build(kind, conn, ctx, period="month", region=None, bureau=None, date_from=N
         }
     })
     open_ = [r for r in rows if r["_open"]]
-    out["summary"] = [{"label": "Total received", "value": len(rows)}, {"label": "Pending", "value": len(open_)},
+    out.setdefault("summary", [{"label": "Total received", "value": len(rows)}, {"label": "Pending", "value": len(open_)},
                       {"label": "Disposed", "value": len(rows) - len(open_)},
-                      {"label": "Beyond timeline", "value": sum(1 for r in open_ if r["_sla"]["state"] == "BREACHED")}]
+                      {"label": "Beyond timeline", "value": sum(1 for r in open_ if r["_sla"]["state"] == "BREACHED")}])
     return out
+
+
+def _coordination(conn, ctx, rows, today):
+    return coordination_metrics.build(conn, rows, today)
 
 
 def _bureau(conn, ctx, rows, today):
@@ -315,7 +322,19 @@ def to_csv(rep):
     w.writerow([c["label"] for c in rep["columns"]])
     for r in rep["rows"]:
         w.writerow([r.get(c["key"], "") for c in rep["columns"]])
-    return "\ufeff" + buf.getvalue()  # BOM so Excel opens UTF-8 correctly
+    if rep.get("kind") == "coordination":
+        w.writerow([])
+        w.writerow(["Counting method", rep["methodology"]])
+        w.writerow(["Pair review evidence", "Latest decision", "Officer", "Recorded at", "Case A", "Case B", "Audit action"])
+        for review in rep["reviews"]:
+            w.writerow([review["pair_id"], review["decision"], review["reviewed_by"], review["reviewed_at"],
+                        review["case_a"], review["case_b"], review["audit_action_id"]])
+        w.writerow(["Room evidence", "Institution", "Lead bureau", "Outcome", "Selected cases", "Pending followers", "Overdue followers", "Decision days", "Case IDs"])
+        for room in rep["evidence"]:
+            w.writerow([room["room_id"], room["institution"], room["lead_bureau"], room["outcome"] or room["status"],
+                        room["selected_cases"], room["pending_followers"], room["overdue_followers"],
+                        room["decision_days"], "; ".join(c["label"] for c in room["cases"])])
+    return "\ufeff" + buf.getvalue()
 
 
 def cases_csv(rows):
