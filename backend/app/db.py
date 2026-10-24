@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-DB_PATH = os.environ.get("AICTE_DB", str(ROOT / "data" / "demo.db"))
+DB_PATH = None
 GENESIS = "0" * 64
 
 # Readers wait while a demo reset rebuilds the tables, so a reset never produces transient errors.
@@ -74,9 +74,20 @@ TABLES = ["institutions", "officers", "cases", "action_history", "overlap_pairs"
           "coordination_rooms", "room_cases", "room_comments", "alerts", "settings", "documents"]
 
 
+def configure(path=None):
+    """Override the database path, or restore environment-based configuration."""
+    global DB_PATH
+    DB_PATH = str(path) if path is not None else None
+
+
+def database_path():
+    return Path(DB_PATH or os.environ.get("AICTE_DB", ROOT / "data" / "demo.db"))
+
+
 def connect():
-    Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+    path = database_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("ALTER TABLE overlap_pairs ADD COLUMN review_rationale TEXT")
@@ -106,7 +117,7 @@ def reset_schema(conn):
 
 
 def is_seeded():
-    if not Path(DB_PATH).exists():
+    if not database_path().exists():
         return False
     try:
         conn = connect()

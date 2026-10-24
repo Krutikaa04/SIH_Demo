@@ -1,28 +1,15 @@
 """Unit tests for the ported JANSETU features: Galaxy graph, per-pair review, tamper restore, briefings, entities."""
 import json
-import os
-import sys
-import tempfile
 import unittest
-from pathlib import Path
 
-_tmp = tempfile.mkdtemp()
-os.environ["AICTE_DB"] = str(Path(_tmp) / "test_ported.db")
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import pytest
 
-from app import db, intel, seed, services, galaxy, briefings  # noqa: E402
-
-def setUpModule():
-    conn = db.connect()
-    seed.seed(conn)
-    conn.close()
+from app import db, intel, seed, services, galaxy, briefings
 
 class TestPortedFeatures(unittest.TestCase):
-    def setUp(self):
-        self.conn = db.connect()
-
-    def tearDown(self):
-        self.conn.close()
+    @pytest.fixture(autouse=True)
+    def setup_database(self, conn):
+        self.conn = conn
 
     def test_galaxy_graph_generation(self):
         g = galaxy.generate_galaxy_graph(self.conn)

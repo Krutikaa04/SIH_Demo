@@ -405,3 +405,13 @@ Suggested split mirrors the original four tracks. Effort is a rough developer-ho
 
 ## 16. Glossary
 **RB** Regulation Bureau · **PGRC** Public Grievance Redressal Cell · **AB** Approval Bureau · **LC** Legal Cell · **VIG** Vigilance Cell · **SLA / prescribed timeline** days within which a case should be disposed · **Cluster** a group of cases flagged as the same real-world problem at one institution · **Coordination Room** the shared space where the Bureaus in a cluster pick a lead and record a decision · **Hash chain** each history record includes the previous record's hash so edits are detectable · **Time machine** demo control that advances the app's clock · **LITE / MOCK** how much of a feature is real in the prototype (see [§2](#2-status-at-a-glance--plan-vs-what-exists)).
+
+## Backend test isolation
+
+Install `requirements-dev.txt` for pytest, HTTP client tests and coverage. Run
+`python -m pytest backend/tests -q --cov=backend/app --cov-report=term-missing`.
+`backend/tests/conftest.py` supplies an isolated database copy per test from one
+session-seeded template, plus `conn`, `client` and `as_role` fixtures. Test modules
+must not set `AICTE_DB` at import time. `db.configure(path)` overrides the DB path;
+`db.configure()` restores environment-based configuration. Mark expensive workflow
+tests with `pytest.mark.slow` when appropriate.

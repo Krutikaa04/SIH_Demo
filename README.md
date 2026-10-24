@@ -70,3 +70,13 @@ backend/app/           FastAPI app, SQLite access, seed generator, overlap engin
 frontend/src/          React + Vite + Tailwind UI
 data/demo.db           created on first run
 ```
+
+## Backend checks
+
+Install test tools with `python -m pip install -r requirements-dev.txt` after runtime
+requirements. Run `python -m pytest backend/tests -q` or include coverage with
+`python -m pytest backend/tests -q --cov=backend/app --cov-report=term-missing`.
+Tests seed one temporary template and copy it for every test; they never use the demo
+DB. Fixtures are `db_path`, `conn`, `client`, and `as_role(role, region=None)`.
+Use `db.configure(path)` to override the database location, or `db.configure()` to
+return to the `AICTE_DB` environment setting, resolved when a connection is opened.

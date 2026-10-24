@@ -1,23 +1,14 @@
 """Tests for complaint registration (form + CSV import) and the coordination guard.
 
-Separate DB from test_prototype.py (own temp file) so the two modules cannot affect each other.
+Each test receives an isolated copy of the seeded database from conftest.py.
 Run:  python -m pytest backend/tests -q
 """
-import os
-import sys
-import tempfile
 import unittest
-from pathlib import Path
 
-# Own throw-away DB. NOTE: app.db reads AICTE_DB at import time, so when pytest imports both test modules in
-# one process the first import wins; the tests below therefore only rely on data both seeds share (same seed).
-if "AICTE_DB" not in os.environ:
-    os.environ["AICTE_DB"] = str(Path(tempfile.mkdtemp()) / "reg.db")
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import pytest
+from fastapi import HTTPException
 
-from fastapi import HTTPException  # noqa: E402
-
-from app import db, intel, main, roles, seed, services  # noqa: E402
+from app import db, intel, main, roles, seed, services
 
 HERO = "1-4520311"
 TEXT = "Students say regular teachers are missing for months and the faculty strength is far below norms."
@@ -29,19 +20,10 @@ def _ctx(role):
 
 
 class TestRegistrationAndGuard(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.path = os.environ["AICTE_DB"]
-        conn = db.connect()
-        seed.seed(conn)  # fresh, known state for this class
-        conn.close()
-
-    def setUp(self):
-        self.conn = db.connect()
+    @pytest.fixture(autouse=True)
+    def setup_database(self, conn):
+        self.conn = conn
         self.sm, self.pg, self.rb = _ctx("SENIOR"), _ctx("PGRC"), _ctx("RB")
-
-    def tearDown(self):
-        self.conn.close()
 
     def _register(self, **over):
         data = {"institution_name": "Sahyadri Govt Coll of Engg Poona", "bureau": "PGRC", "category": "Academic Quality",
