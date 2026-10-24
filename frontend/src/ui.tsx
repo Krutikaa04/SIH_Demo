@@ -77,13 +77,16 @@ export function ScoreRing({ score, band, size = 64 }: { score: number; band: str
   )
 }
 
-export function Card({ title, right, children, className, pad = true }:
-  { title?: ReactNode; right?: ReactNode; children: ReactNode; className?: string; pad?: boolean }) {
+export function Card({ title, subtitle, right, children, className, pad = true }:
+  { title?: ReactNode; subtitle?: ReactNode; right?: ReactNode; children: ReactNode; className?: string; pad?: boolean }) {
   return (
     <section className={cx('rounded-xl bg-white shadow-sm ring-1 ring-slate-200/70', className)}>
-      {(title || right) && (
+      {(title || subtitle || right) && (
         <header className="flex items-center justify-between px-4 pt-3.5 pb-1">
-          <h3 className="text-sm font-semibold text-slate-800">{title}</h3>{right}
+          <div>
+            {title && <h3 className="text-sm font-semibold text-slate-800">{title}</h3>}
+            {subtitle && <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p>}
+          </div>{right}
         </header>
       )}
       <div className={pad ? 'p-4' : ''}>{children}</div>
