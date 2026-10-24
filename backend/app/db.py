@@ -64,6 +64,12 @@ CREATE TABLE alerts (
   target_bureaus TEXT, read_roles TEXT
 );
 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE case_number_counters (
+  bureau TEXT NOT NULL,
+  year INTEGER NOT NULL,
+  value INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (bureau, year)
+);
 CREATE TABLE documents (
   id INTEGER PRIMARY KEY AUTOINCREMENT, case_id TEXT, seq INTEGER, filename TEXT, path TEXT, sha256 TEXT,
   size INTEGER, uploaded_by TEXT, uploaded_at TEXT
@@ -77,8 +83,21 @@ CREATE TABLE outbox (
 CREATE INDEX ix_outbox_alert ON outbox(alert_id);
 """
 
-TABLES = ["institutions", "officers", "cases", "action_history", "overlap_pairs",
-          "coordination_rooms", "room_cases", "room_comments", "alerts", "settings", "documents", "outbox"]
+TABLES = [
+    "institutions",
+    "officers",
+    "cases",
+    "action_history",
+    "overlap_pairs",
+    "coordination_rooms",
+    "room_cases",
+    "room_comments",
+    "alerts",
+    "settings",
+    "case_number_counters",
+    "documents",
+    "outbox",
+]
 
 
 def configure(path=None):
@@ -180,10 +199,20 @@ def set_setting(conn, key, value):
                  "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, str(value)))
 
 
+
 def next_counter(conn, key):
-    n = int(get_setting(conn, key, "0")) + 1
-    set_setting(conn, key, n)
-    return n
+    row = conn.execute(
+        """
+        INSERT INTO settings(key, value)
+        VALUES (?, '1')
+        ON CONFLICT(key) DO UPDATE
+        SET value = CAST(settings.value AS INTEGER) + 1
+        RETURNING value
+        """,
+        (key,),
+    ).fetchone()
+    return int(row["value"])
+
 
 
 def now(conn):
