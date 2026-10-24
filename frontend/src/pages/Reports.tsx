@@ -225,8 +225,12 @@ export default function Reports() {
           </Card>
 
           <Card pad={false}>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+<div
+  className="overflow-x-auto"
+  tabIndex={0}
+  role="region"
+  aria-label="Scrollable reports table"
+>              <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wider text-slate-400">
                   <tr>{rep.columns.map((c: any) => <th key={c.key} className="whitespace-nowrap px-4 py-2.5 font-medium">{c.label}</th>)}</tr></thead>
                 <tbody className="divide-y divide-slate-100">

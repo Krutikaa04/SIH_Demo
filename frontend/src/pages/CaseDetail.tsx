@@ -71,23 +71,25 @@ export default function CaseDetail() {
   }
 
   return (
-    <div className="mx-auto max-w-[1300px] space-y-5">
+    <div className="mx-auto w-full min-w-0 max-w-[1300px] space-y-5">
       <Link to="/cases" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"><ArrowLeft size={15} /> All cases</Link>
 
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight">{c.case_id}</h1>
+            <h1 className="break-words text-2xl font-bold tracking-tight">{c.case_id}</h1>
             <StatusChip status={c.status} /><BureauBadge code={c.bureau} />
             {c.escalation_level > 0 && <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[11px] font-bold text-orange-700">ESCALATED L{c.escalation_level}</span>}
           </div>
-          <Link to={`/institutions/${c.institution.aicte_id}`} className="mt-1 block text-slate-600 hover:underline">{c.institution.name}</Link>
+          <Link to={`/institutions/${c.institution.aicte_id}`} className="mt-1 block break-words text-slate-600 hover:underline">{c.institution.name}</Link>
         </div>
-        <div className="flex items-center gap-4 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-slate-200/70">
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-4 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-slate-200/70 sm:w-auto sm:flex-nowrap">
           <div><div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Prescribed timeline</div>
-            <div className="num text-sm text-slate-600">{c.sla.days} days · due {fmtDate(c.expected_disposal)}</div></div>
+            <div className="num text-sm text-slate-600">
+  {c.sla.days} {c.sla.use_working_days ? 'working days' : 'calendar days'} · due {fmtDate(c.expected_disposal)}
+</div></div>
           <SlaChip sla={c.sla} />
-          {clock && <div className="border-l border-slate-200 pl-4"><Countdown dueDate={c.expected_disposal} serverNow={clock.now} closed={c.sla.state === 'CLOSED'} /></div>}
+          {clock && <div className="min-w-0 border-l border-slate-200 pl-4"><Countdown dueDate={c.expected_disposal} serverNow={clock.now} closed={c.sla.state === 'CLOSED'} /></div>}
         </div>
       </div>
 
@@ -107,7 +109,7 @@ export default function CaseDetail() {
       {active && (
         <div className="flex flex-wrap items-center gap-4 rounded-xl border border-red-200 bg-red-50 p-4">
           <div className="rounded-full bg-red-100 p-2 text-red-600 pulse-red"><Siren size={20} /></div>
-          <div className="flex-1">
+          <div className="min-w-0 flex-1">
             <div className="font-bold text-red-700">Potential Overlapping Cases — Coordination Required</div>
             <div className="text-sm text-red-700/90">The same institution has related complaints with {ov.other_bureaus.join(', ')}. Avoid duplicate action — coordinate before proceeding.</div>
           </div>
@@ -124,9 +126,9 @@ export default function CaseDetail() {
           <Siren size={17} className="mt-0.5 shrink-0" /><span>{c.guard.message}</span></div>)}
 
       <div className="grid gap-5 lg:grid-cols-5">
-        <div className="space-y-5 lg:col-span-2">
+        <div className="min-w-0 space-y-5 lg:col-span-2">
           <Card title="Case details">
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-3.5">
+            <dl className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-3.5 sm:grid-cols-2">
               <Field label="Category">{c.category}</Field>
               <Field label="Severity"><span className="num">{c.severity} / 5</span></Field>
               <Field label="Date of receipt">{fmtDate(c.received_on)}</Field>
@@ -135,7 +137,7 @@ export default function CaseDetail() {
               <Field label="Reference no.">{c.reference_no}</Field>
               <Field label="Last action">{c.last_action}<div className="text-xs text-slate-400">{fmtTs(c.last_action_at)}</div></Field>
               <Field label="Next action required">{c.next_action}</Field>
-              {c.outcome && <div className="col-span-2"><Field label="Outcome">{c.outcome}</Field></div>}
+              {c.outcome && <div className="sm:col-span-2"><Field label="Outcome">{c.outcome}</Field></div>}
             </dl>
             <div className="mt-4 border-t border-slate-100 pt-3"><dt className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Complaint</dt>
               <p className="mt-1 text-sm leading-relaxed text-slate-700">{c.description}</p></div>
@@ -146,7 +148,7 @@ export default function CaseDetail() {
               <div className="rounded-lg bg-slate-50 p-3"><div className="text-[11px] uppercase tracking-wider text-slate-400">Submitted as</div>
                 <div className="font-medium text-slate-800">“{c.submitted_institution_name}”</div>
                 <div className="text-xs text-slate-500">{c.submitted_aicte_id ? `AICTE ID quoted: ${c.submitted_aicte_id}` : 'No AICTE ID on the complaint'}</div></div>
-              <div className="flex items-center gap-2 text-emerald-700"><BadgeCheck size={16} /> Resolved to <b>{c.institution.aicte_id}</b> — {resolutionLabel}</div>
+              <div className="flex min-w-0 flex-wrap items-center gap-2 text-emerald-700"><BadgeCheck size={16} /> Resolved to <b>{c.institution.aicte_id}</b> — {resolutionLabel}</div>
             </div>
           </Card>
 
@@ -157,7 +159,7 @@ export default function CaseDetail() {
             {uploadErr && <div className="mb-2 rounded-lg bg-red-50 p-2 text-xs text-red-700">{uploadErr}</div>}
             <ul className="space-y-2">
               {(docs?.items || []).map((d: any) => (
-                <li key={d.id} className="flex items-center gap-2.5 rounded-lg bg-slate-50 p-2.5 text-sm">
+                <li key={d.id} className="flex min-w-0 flex-wrap items-center gap-2.5 rounded-lg bg-slate-50 p-2.5 text-sm sm:flex-nowrap">
                   <Paperclip size={15} className="shrink-0 text-slate-400" />
                   <div className="min-w-0 flex-1"><div className="truncate font-medium text-slate-800">{d.filename}</div>
                     <div className="text-[11px] text-slate-400">{(d.size / 1024).toFixed(1)} KB · {d.uploaded_by} · {fmtTs(d.uploaded_at)}</div></div>
@@ -169,14 +171,14 @@ export default function CaseDetail() {
           </Card>
         </div>
 
-        <Card title="Action history & movement" className="lg:col-span-3"
+        <Card title="Action history & movement" className="min-w-0 lg:col-span-3"
           right={<button onClick={verify} className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"><ShieldCheck size={14} /> Verify integrity</button>}>
           {ver && (
             <div className={cx('mb-3 flex items-center gap-2 rounded-lg p-2.5 text-sm', ver.ok ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700')}>
               {ver.ok ? <ShieldCheck size={16} /> : <ShieldAlert size={16} />}
               {ver.ok ? `Audit trail intact — ${ver.checked} records, hash chain verified.` : `Tampering detected at record #${ver.first_break.seq}: ${ver.first_break.reason}.`}
             </div>)}
-          <ol className="relative space-y-4 border-l-2 border-slate-100 pl-6">
+          <ol className="relative min-w-0 space-y-4 border-l-2 border-slate-100 pl-6">
             {(h?.items || []).slice().reverse().map((e: any) => {
               const Icon = ICONS[e.action_type] || FileText
               return (
@@ -187,12 +189,12 @@ export default function CaseDetail() {
                     {e.from_bureau && e.to_bureau && e.from_bureau !== e.to_bureau && <span className="flex items-center gap-1 text-xs"><BureauBadge code={e.from_bureau} /> → <BureauBadge code={e.to_bureau} /></span>}
                     <span className="text-xs text-slate-400">{fmtTs(e.ts)}</span>
                   </div>
-                  <p className="mt-0.5 text-sm text-slate-600">{e.remarks}</p>
+                  <p className="mt-0.5 break-words text-sm text-slate-600">{e.remarks}</p>
                   {(e.documents || []).length > 0 && (
                     <div className="mt-1.5 flex flex-wrap gap-1.5">
                       {e.documents.map((d: any) => (
                         <button key={d.id} onClick={() => download(`/documents/${d.id}/download`, d.filename)}
-                          className="flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200"><Paperclip size={11} />{d.filename}</button>))}
+                          className="flex max-w-full min-w-0 items-center gap-1 break-all rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200"><Paperclip size={11} />{d.filename}</button>))}
                     </div>)}
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
                     <span className="flex items-center gap-1">{e.actor.name === 'System (SLA engine)' ? <Zap size={11} /> : <UserCheck size={11} />}{e.actor.name} · {e.actor.bureau}</span>
