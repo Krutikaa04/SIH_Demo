@@ -1,12 +1,14 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { FileDown, FileSpreadsheet, Calculator, Clock, Zap, TrendingUp, CheckCircle } from 'lucide-react'
+import { FileDown, FileSpreadsheet, Calculator, Clock, Zap, TrendingUp, CheckCircle, X } from 'lucide-react'
 import { download, useApi } from '../api'
 import { exportReportPdf } from '../pdf'
 import { Card, ErrorBox, Loading, RiskBadge, cx } from '../ui'
 
 const TABS = [
-  ['bureau', 'Bureau / Cell-wise'], ['region', 'Region-wise'], ['institution', 'Institution-wise'], ['ageing', 'Pending ageing'],
+  ['bureau', 'Bureau / Cell-wise'], ['region', 'Region-wise'], ['institution', 'Institution-wise'],
+  ['status', 'Status-wise'], ['ageing', 'Pending ageing'],
   ['disposal', 'Disposal rate'], ['overlaps', 'Overlapping cases'], ['periodic', 'Monthly / quarterly'],
   ['roi', 'Effort-saved ROI Model'],
 ]
@@ -152,16 +154,43 @@ function RoiCalculator() {
 }
 
 export default function Reports() {
-  const [kind, setKind] = useState('bureau')
-  const [period, setPeriod] = useState<'month' | 'quarter'>('month')
-  const qs = kind === 'periodic' ? `?period=${period}` : ''
+  const [sp, setSp] = useSearchParams()
+  const kind = sp.get('kind') || 'bureau'
+  const period = (sp.get('period') as 'month' | 'quarter') || 'month'
+  const region = sp.get('region') || ''
+  const bureau = sp.get('bureau') || ''
+  const date_from = sp.get('date_from') || ''
+  const date_to = sp.get('date_to') || ''
+
+  const setParam = (k: string, v: string) => {
+    const n = new URLSearchParams(sp)
+    v ? n.set(k, v) : n.delete(k)
+    setSp(n, { replace: true })
+  }
+
+  const meta = useApi<any>('/meta', false)
   const isRoi = kind === 'roi'
+
+  const apiParams = new URLSearchParams()
+  if (region) apiParams.set('region', region)
+  if (bureau) apiParams.set('bureau', bureau)
+  if (date_from) apiParams.set('date_from', date_from)
+  if (date_to) apiParams.set('date_to', date_to)
+  if (kind === 'periodic') apiParams.set('period', period)
+  const qs = apiParams.toString() ? `?${apiParams.toString()}` : ''
+
   const { data: rep, error, loading } = useApi<any>(!isRoi ? `/reports/${kind}${qs}` : null)
   const [busy, setBusy] = useState(false)
 
   async function csv() {
     setBusy(true)
-    try { await download(`/reports/${kind}?format=csv${kind === 'periodic' ? `&period=${period}` : ''}`, `aicte_${kind}_report.csv`) } finally { setBusy(false) }
+    try {
+      const csvParams = new URLSearchParams(apiParams)
+      csvParams.set('format', 'csv')
+      await download(`/reports/${kind}?${csvParams.toString()}`, `aicte_${kind}_report.csv`)
+    } finally {
+      setBusy(false)
+    }
   }
 
   const chartRows = rep?.chart?.rows || rep?.rows
@@ -172,11 +201,13 @@ export default function Reports() {
     return v
   }
 
+  const hasFilters = Boolean(region || bureau || date_from || date_to)
+
   return (
     <div className="mx-auto max-w-[1300px] space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div><h1 className="text-xl font-bold tracking-tight">Reports &amp; analytics</h1>
-          <p className="text-sm text-slate-500">Bureau-wise, region-wise, institution-wise, ageing, disposal rate, overlaps, periodic and ROI metrics.</p></div>
+          <p className="text-sm text-slate-500">Bureau-wise, region-wise, institution-wise, status-wise, ageing, disposal rate, overlaps, periodic and ROI metrics.</p></div>
         {!isRoi && (
           <div className="flex gap-2">
             <button onClick={csv} disabled={busy || !rep} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"><FileSpreadsheet size={16} className="text-emerald-600" /> Export CSV</button>
@@ -187,8 +218,93 @@ export default function Reports() {
 
       <div className="flex flex-wrap gap-2">
         {TABS.map(([k, l]) => (
-          <button key={k} onClick={() => setKind(k)} className={cx('rounded-full px-3.5 py-1.5 text-sm font-medium', kind === k ? 'bg-navy text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50')}>{l}</button>))}
+          <button key={k} onClick={() => setParam('kind', k)} className={cx('rounded-full px-3.5 py-1.5 text-sm font-medium', kind === k ? 'bg-navy text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50')}>{l}</button>))}
       </div>
+
+      {!isRoi && (
+        <Card pad={false}>
+          <div className="grid grid-cols-2 gap-3 p-3.5 sm:grid-cols-4 lg:grid-cols-6 items-end">
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-400">Region</span>
+              <select
+                value={region}
+                onChange={(e) => setParam('region', e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-navy-2"
+              >
+                <option value="">All regions</option>
+                {(meta.data?.regions || []).map((r: any) => (
+                  <option key={r.name} value={r.name}>{r.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-400">Bureau / Cell</span>
+              <select
+                value={bureau}
+                onChange={(e) => setParam('bureau', e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-navy-2"
+              >
+                <option value="">All Bureaus</option>
+                {(meta.data?.bureaus || []).map((b: any) => (
+                  <option key={b.code} value={b.code}>{b.code} — {b.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-400">Received from</span>
+              <input
+                type="date"
+                value={date_from}
+                onChange={(e) => setParam('date_from', e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-navy-2"
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-400">Received to</span>
+              <input
+                type="date"
+                value={date_to}
+                onChange={(e) => setParam('date_to', e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-navy-2"
+              />
+            </label>
+
+            {kind === 'periodic' && (
+              <label className="block">
+                <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-400">Period</span>
+                <select
+                  value={period}
+                  onChange={(e) => setParam('period', e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-navy-2"
+                >
+                  <option value="month">Monthly</option>
+                  <option value="quarter">Quarterly</option>
+                </select>
+              </label>
+            )}
+
+            {hasFilters && (
+              <div className="flex items-center pb-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const n = new URLSearchParams()
+                    n.set('kind', kind)
+                    if (kind === 'periodic') n.set('period', period)
+                    setSp(n, { replace: true })
+                  }}
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
+                >
+                  <X size={12} /> Clear filters
+                </button>
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
 
       {isRoi ? (
         <RoiCalculator />
@@ -206,7 +322,7 @@ export default function Reports() {
             right={<div className="flex items-center gap-3 text-xs text-slate-400">
               {kind === 'periodic' && (
                 <div className="flex rounded-lg bg-slate-100 p-0.5 text-sm">
-                  {(['month', 'quarter'] as const).map((p) => <button key={p} onClick={() => setPeriod(p)} className={cx('rounded-md px-2.5 py-1 font-medium capitalize', period === p ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500')}>{p}ly</button>)}
+                  {(['month', 'quarter'] as const).map((p) => <button key={p} onClick={() => setParam('period', p)} className={cx('rounded-md px-2.5 py-1 font-medium capitalize', period === p ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500')}>{p}ly</button>)}
                 </div>)}
               {rep.scope} · {rep.generated_at.slice(0, 16).replace('T', ' ')}</div>}>
             <div className="h-64">

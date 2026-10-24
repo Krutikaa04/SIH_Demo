@@ -33,7 +33,7 @@ Legend: ✅ built and tested · 🟡 built, simplified on purpose (LITE) · 🎭
 ### Required features
 | # | Feature | Status | Where it lives |
 |---|---|---|---|
-| R1 | Centralized institution profile | ✅ | `pages/Institution.tsx`, `GET /api/institutions/{id}` |
+| R1 | Centralized institution profile | ✅ | `pages/Institution.tsx`, `GET /api/institutions/{id}`, `GET /api/institutions/{id}/history.csv` |
 | R2 | Case tracking (all required fields) | ✅ | `pages/Cases.tsx`, `pages/CaseDetail.tsx`, `GET /api/cases` |
 | R2+ | **Register a complaint** (form with live institution match + overlap preview) and **bulk CSV import** | ✅ | `pages/Register.tsx`, `services.register_complaint()`, `POST /api/complaints*` |
 | R3 | Cross-Bureau overlap detection + linking | ✅ | `backend/app/intel.py`, `pages/Overlaps.tsx`, `pages/Room.tsx` |
@@ -41,7 +41,7 @@ Legend: ✅ built and tested · 🟡 built, simplified on purpose (LITE) · 🎭
 | R5 | Workflow & action history (+ documents) | ✅ / 🟡 docs on local disk, no preview | `POST /api/cases/{id}/actions`, `extras.py` (documents) |
 | R6 | Search & filters (all 8 filters) | ✅ | `Cases.tsx`, `services.case_where()` |
 | R7 | Alerts & notifications | 🟡 in-app only; 🎭 email/SMS not sent | `sla.py`, `pages/Alerts.tsx`, bell in `Layout.tsx` |
-| R8 | Reports & analytics (7 reports) | 🟡 fixed set, no custom builder | `reports.py`, `pages/Reports.tsx` |
+| R8 | Reports & analytics (8 reports + filters) | ✅ Bureau, region, institution, status, ageing, disposal, overlaps, periodic with additive filters | `reports.py`, `pages/Reports.tsx` |
 
 ### Standout features (A–K) and extras
 | # | Feature | Status | Notes |
