@@ -24,7 +24,10 @@ def main():
         conn.close()
         print("Seed complete.")
     if not (ROOT / "frontend" / "dist" / "index.html").exists():
-        print("NOTE: frontend/dist not found. Build the UI once:  cd frontend && npm install && npm run build")
+     print("ERROR: Built frontend is missing.")
+     print("For development: install Node.js, then run npm ci && npm run build inside frontend/.")
+     print("For the offline demo: use the built bundle downloaded from GitHub Releases.")
+     return
 
     import uvicorn
 

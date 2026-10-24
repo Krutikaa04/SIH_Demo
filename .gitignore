@@ -17,3 +17,6 @@ vendor/
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Generated frontend production build
+frontend/dist/
