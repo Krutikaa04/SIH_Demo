@@ -4,12 +4,13 @@ import io
 from datetime import date, datetime, timedelta
 
 from . import db, risk, services
-from .constants import BUREAUS, REGION_STATES
+from .constants import BUREAUS, REGION_STATES, STATUSES
 
 KINDS = {
     "bureau": "Bureau / Cell-wise status report",
     "region": "Region-wise report",
     "institution": "Institution-wise complaint history & risk",
+    "status": "Status-wise distribution report",
     "ageing": "Pending case ageing analysis",
     "disposal": "Disposal rate & performance",
     "overlaps": "Overlapping / duplicate cases",
@@ -21,18 +22,50 @@ def _d(s):
     return datetime.strptime(s[:10], "%Y-%m-%d").date()
 
 
-def _load(conn, ctx):
+def _load(conn, ctx, region=None, bureau=None, date_from=None, date_to=None):
     today = db.now(conn).date()
     rows = db.rows(conn, services.CASE_SELECT)
+
+    effective_region = region
     if ctx.role == "REGIONAL":
-        rows = [r for r in rows if r["inst_region"] == ctx.region]
+        if region and region != ctx.region:
+            raise ValueError(f"Access denied: cannot request region '{region}' while in role REGIONAL ({ctx.region})")
+        effective_region = ctx.region
+
+    if effective_region and effective_region not in REGION_STATES:
+        raise ValueError(f"Unknown region: '{effective_region}'")
+
+    if bureau and bureau not in BUREAUS:
+        raise ValueError(f"Unknown bureau: '{bureau}'")
+
+    if date_from:
+        try:
+            _d(date_from)
+        except Exception:
+            raise ValueError(f"Invalid date_from format: '{date_from}' (expected YYYY-MM-DD)")
+
+    if date_to:
+        try:
+            _d(date_to)
+        except Exception:
+            raise ValueError(f"Invalid date_to format: '{date_to}' (expected YYYY-MM-DD)")
+
+    if effective_region:
+        rows = [r for r in rows if r["inst_region"] == effective_region]
+    if bureau:
+        rows = [r for r in rows if r["bureau_code"] == bureau]
+    if date_from:
+        rows = [r for r in rows if r["received_on"] >= date_from]
+    if date_to:
+        rows = [r for r in rows if r["received_on"] <= date_to]
+
     for r in rows:
         r["_sla"] = services.sla_info(r, today)
         r["_open"] = r["status"] != "Disposed"
         r["_age"] = r["_sla"]["age_days"]
         if r["disposed_on"]:
             r["_days_to_dispose"] = (_d(r["disposed_on"]) - _d(r["received_on"])).days
-    return rows, today
+    return rows, today, effective_region
 
 
 def _pct(a, b):
@@ -44,14 +77,26 @@ def _avg(xs):
     return round(sum(xs) / len(xs), 1) if xs else 0.0
 
 
-def build(kind, conn, ctx, period="month"):
+def build(kind, conn, ctx, period="month", region=None, bureau=None, date_from=None, date_to=None):
     if kind not in KINDS:
         raise KeyError(kind)
-    rows, today = _load(conn, ctx)
+    rows, today, effective_region = _load(conn, ctx, region=region, bureau=bureau, date_from=date_from, date_to=date_to)
     out = globals()["_" + kind](conn, ctx, rows, today, period) if kind == "periodic" else \
         globals()["_" + kind](conn, ctx, rows, today)
-    out.update({"kind": kind, "title": KINDS[kind], "generated_at": db.iso(db.now(conn)),
-                "scope": ctx.region + " region" if ctx.role == "REGIONAL" else "All regions"})
+    scope_label = (effective_region + " region") if effective_region else ("All regions")
+    out.update({
+        "kind": kind,
+        "title": KINDS[kind],
+        "generated_at": db.iso(db.now(conn)),
+        "scope": scope_label,
+        "filters": {
+            "region": effective_region or "",
+            "bureau": bureau or "",
+            "date_from": date_from or "",
+            "date_to": date_to or "",
+            "period": period if kind == "periodic" else "",
+        }
+    })
     open_ = [r for r in rows if r["_open"]]
     out["summary"] = [{"label": "Total received", "value": len(rows)}, {"label": "Pending", "value": len(open_)},
                       {"label": "Disposed", "value": len(rows) - len(open_)},
@@ -127,6 +172,41 @@ def _institution(conn, ctx, rows, today):
     return {"columns": [{"key": k, "label": l} for k, l in cols], "rows": data,
             "chart": {"x": "short", "rows": [{**t, "short": t["name"].split(",")[-1].strip() + " · " + t["name"].split()[0]} for t in top],
                       "series": [{"key": "risk", "label": "Risk score", "color": "#dc2626"}]}}
+
+
+def _status(conn, ctx, rows, today):
+    cols = [("status", "Status"), ("rb", "RB"), ("pgrc", "PGRC"), ("ab", "AB"),
+            ("lc", "LC"), ("vig", "VIG"), ("total", "Total"), ("share", "Share %"),
+            ("avg_age", "Avg age (d)")]
+    data = []
+    for st in STATUSES:
+        m = [r for r in rows if r["status"] == st]
+        data.append({
+            "status": st,
+            "rb": sum(1 for r in m if r["bureau_code"] == "RB"),
+            "pgrc": sum(1 for r in m if r["bureau_code"] == "PGRC"),
+            "ab": sum(1 for r in m if r["bureau_code"] == "AB"),
+            "lc": sum(1 for r in m if r["bureau_code"] == "LC"),
+            "vig": sum(1 for r in m if r["bureau_code"] == "VIG"),
+            "total": len(m),
+            "share": _pct(len(m), len(rows)),
+            "avg_age": _avg(r["_age"] for r in m),
+        })
+    return {
+        "columns": [{"key": k, "label": l} for k, l in cols],
+        "rows": data,
+        "chart": {
+            "x": "status",
+            "stacked": True,
+            "series": [
+                {"key": "rb", "label": "RB", "color": "#1d4ed8"},
+                {"key": "pgrc", "label": "PGRC", "color": "#7c3aed"},
+                {"key": "ab", "label": "AB", "color": "#0d9488"},
+                {"key": "lc", "label": "LC", "color": "#b45309"},
+                {"key": "vig", "label": "VIG", "color": "#be123c"},
+            ]
+        }
+    }
 
 
 def _ageing(conn, ctx, rows, today):
@@ -226,11 +306,16 @@ def _periodic(conn, ctx, rows, today, period="month"):
 def to_csv(rep):
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow([rep["title"], rep["scope"], "Generated " + rep["generated_at"], "SYNTHETIC DATA - PROTOTYPE"])
+    filter_parts = [f"{k}={v}" for k, v in rep.get("filters", {}).items() if v]
+    header = [rep["title"], rep["scope"]]
+    if filter_parts:
+        header.append("Filters: " + ", ".join(filter_parts))
+    header.extend(["Generated " + rep["generated_at"], "SYNTHETIC DATA - PROTOTYPE"])
+    w.writerow(header)
     w.writerow([c["label"] for c in rep["columns"]])
     for r in rep["rows"]:
         w.writerow([r.get(c["key"], "") for c in rep["columns"]])
-    return "﻿" + buf.getvalue()  # BOM so Excel opens UTF-8 correctly
+    return "\ufeff" + buf.getvalue()  # BOM so Excel opens UTF-8 correctly
 
 
 def cases_csv(rows):
@@ -243,14 +328,30 @@ def cases_csv(rows):
                     c["institution"]["region"], c["category"], c["bureau"], c["status"], c["assigned_officer"]["name"],
                     c["received_on"], c["expected_disposal"], c["sla"]["state"], c["sla"]["remaining_days"],
                     c["last_action"], c["next_action"], (c["overlap"] or {}).get("cluster_id", "")])
-    return "﻿" + buf.getvalue()
+    return "\ufeff" + buf.getvalue()
+
+
+def institution_history_csv(inst, items, conn):
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([f"Case history for {inst['name']} ({inst['aicte_id']})", f"Region: {inst['region']}", "SYNTHETIC DATA - PROTOTYPE"])
+    w.writerow(["Case ID", "Reference", "Category", "Bureau", "Status", "Officer", "Received", "Due", "Timeline", "Days remaining", "Last action", "Last action at", "Next action", "History events count"])
+    for c in items:
+        event_count = conn.execute("SELECT COUNT(*) FROM action_history WHERE case_id=?", (c["case_id"],)).fetchone()[0]
+        w.writerow([
+            c["case_id"], c["reference_no"], c["category"], c["bureau"], c["status"],
+            c["assigned_officer"]["name"], c["received_on"], c["expected_disposal"],
+            c["sla"]["state"], c["sla"]["remaining_days"], c["last_action"] or "—",
+            c["last_action_at"] or "—", c["next_action"] or "—", event_count
+        ])
+    return "\ufeff" + buf.getvalue()
 
 
 # ---------------------------------------------------------------- briefing --------
 
 def briefing(conn, ctx):
     """Rule-based narrative for management, driven by live numbers (template text, not an LLM)."""
-    rows, today = _load(conn, ctx)
+    rows, today, _ = _load(conn, ctx)
     open_ = [r for r in rows if r["_open"]]
     items = []
     cmap = {k: v for k, v in services.cluster_map(conn).items()

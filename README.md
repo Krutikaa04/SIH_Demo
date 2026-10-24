@@ -46,8 +46,8 @@ Run the backend in another terminal with `python run.py --no-browser`.
 - **Natural-language search** (rule-based, offline): ask e.g. "pending RB cases in Western region older than 30 days";
   the Cases page shows exactly what it understood as chips
 - **India region heatmap** (pending / beyond timeline / average risk) - click a region to open its cases
-- **Reports & analytics**: Bureau-wise, region-wise, institution-wise, ageing, disposal rate, overlaps and
-  monthly/quarterly, each with CSV and PDF export; the case list also exports to CSV
+- **Reports & analytics**: Bureau-wise, region-wise, institution-wise, status-wise, ageing, disposal rate, overlaps and
+  monthly/quarterly with filter bar, each with CSV and PDF export; the case list and institution history also export to CSV
 - **Supporting documents** on cases (upload/download, SHA-256 verified, recorded in the hash-chained history)
 - **Register complaint** (new page): live institution match and overlap preview while typing, plus bulk CSV import (validate first)
 - **Coordination guard**: acting on an overlapping case needs a logged acknowledgement; after a MERGE the follower Bureau cannot transfer/escalate/dispose

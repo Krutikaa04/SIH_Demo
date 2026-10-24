@@ -358,16 +358,105 @@ def recluster(conn, institution_id):
                      (cid, *cases))
 
 
+# ---------------------------------------------------------------- entity extraction ---
+
+AMOUNT_PREFIX_RE = re.compile(
+    r"(?:\b|(?<=[\s]))(?:₹|Rs\.?|INR)\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*(lakhs?|crores?|cr\.?)?\b",
+    re.IGNORECASE
+)
+AMOUNT_SUFFIX_RE = re.compile(
+    r"\b([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*(lakhs?|crores?|cr\.?|rupees?)\b",
+    re.IGNORECASE
+)
+
+CIRCULAR_RE = re.compile(
+    r"\b(?:circular|ref(?:erence)?|notification|order|file|f\.?\s*no\.?)"
+    r"(?:\s*(?:no\.?|#|num(?:ber)?))?"
+    r"(?:\s*[:\-–/#]\s*|\s+|#)"
+    r"((?=[A-Za-z0-9\-/.]{2,}\b)[A-Za-z0-9\-/.]*\d[A-Za-z0-9\-/.]*)",
+    re.IGNORECASE
+)
+
+ROLL_RE = re.compile(
+    r"\b(?:roll|reg(?:istration)?|enrol(?:l)?ment|hall[- ]?ticket)"
+    r"(?:\s*(?:no\.?|#|num(?:ber)?))?"
+    r"(?:\s*[:\-–/#]\s*|\s+|#)"
+    r"((?=[A-Za-z0-9\-]{2,}\b)[A-Za-z0-9\-]*\d[A-Za-z0-9\-]*)",
+    re.IGNORECASE
+)
+
+
+def _parse_amount_to_number(num_str: str, unit: str = "") -> int:
+    clean_num = num_str.replace(",", "").strip()
+    try:
+        val = float(clean_num)
+    except ValueError:
+        return 0
+    unit_lower = (unit or "").lower().strip()
+    if "crore" in unit_lower or unit_lower in ("cr", "cr."):
+        val *= 10_000_000
+    elif "lakh" in unit_lower:
+        val *= 100_000
+    return int(round(val))
+
+
 def extract_entities(text: str) -> dict:
-    """Extracts financial amounts, circular numbers, and roll/registration numbers from text."""
+    """Extracts financial amounts, circular numbers, and roll/registration numbers from text.
+
+    Accepted formats:
+      - Amounts: ₹45,000, Rs. 1.5 lakh, INR 50,000, 2 crore, 25000 rupees.
+      - Circulars: Circular No. AICTE/2026/04, F.No. 12-3/2025, Ref: AICTE-2023-11, Order #2024/99.
+      - Roll Numbers: Roll no: ENR-99214, Registration No. 2024-REG-991, Hall Ticket HT2026001.
+
+    Returns:
+      dict with keys:
+        amounts: list[str] of formatted amount strings (sorted unique)
+        amount_values: list[int] of numeric rupee values (sorted unique)
+        circulars: list[str] of uppercase normalised identifiers (sorted unique)
+        roll_numbers: list[str] of uppercase normalised identifiers (sorted unique)
+    """
     if not text:
-        return {"amounts": [], "circulars": [], "roll_numbers": []}
-    amounts = re.findall(r"(?:₹|Rs\.?|INR)\s*[\d,]+|(?:[\d,]+)\s*(?:rupees|lakh|crore)", text, re.IGNORECASE)
-    circulars = re.findall(r"(?:circular|ref|notification|order|file)\s*(?:no\.?|#)?\s*[\w\-/]+", text, re.IGNORECASE)
-    rolls = re.findall(r"(?:roll|reg|enrolment|enrollment|hall[- ]?ticket)\s*(?:no\.?|#)?\s*[\w\-]+", text, re.IGNORECASE)
+        return {"amounts": [], "amount_values": [], "circulars": [], "roll_numbers": []}
+
+    s = str(text)[:20000]
+
+    raw_amounts = []
+    amount_values = []
+
+    for m in AMOUNT_PREFIX_RE.finditer(s):
+        full_match = m.group(0).strip()
+        num_part = m.group(1)
+        unit_part = m.group(2) or ""
+        val = _parse_amount_to_number(num_part, unit_part)
+        if val > 0:
+            raw_amounts.append(full_match)
+            amount_values.append(val)
+
+    for m in AMOUNT_SUFFIX_RE.finditer(s):
+        full_match = m.group(0).strip()
+        num_part = m.group(1)
+        unit_part = m.group(2) or ""
+        val = _parse_amount_to_number(num_part, unit_part)
+        if val > 0 and full_match not in raw_amounts:
+            raw_amounts.append(full_match)
+            amount_values.append(val)
+
+    circulars = []
+    for m in CIRCULAR_RE.finditer(s):
+        ident = m.group(1).strip().rstrip(".,;:-/").upper()
+        if ident and any(c.isdigit() for c in ident):
+            circulars.append(ident)
+
+    roll_numbers = []
+    for m in ROLL_RE.finditer(s):
+        ident = m.group(1).strip().rstrip(".,;:-/").upper()
+        if ident and any(c.isdigit() for c in ident):
+            roll_numbers.append(ident)
+
     return {
-        "amounts": sorted(set(amounts)),
+        "amounts": sorted(set(raw_amounts)),
+        "amount_values": sorted(set(amount_values)),
         "circulars": sorted(set(circulars)),
-        "roll_numbers": sorted(set(rolls))
+        "roll_numbers": sorted(set(roll_numbers))
     }
 

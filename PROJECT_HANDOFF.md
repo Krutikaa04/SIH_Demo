@@ -33,7 +33,7 @@ Legend: ✅ built and tested · 🟡 built, simplified on purpose (LITE) · 🎭
 ### Required features
 | # | Feature | Status | Where it lives |
 |---|---|---|---|
-| R1 | Centralized institution profile | ✅ | `pages/Institution.tsx`, `GET /api/institutions/{id}` |
+| R1 | Centralized institution profile | ✅ | `pages/Institution.tsx`, `GET /api/institutions/{id}`, `GET /api/institutions/{id}/history.csv` |
 | R2 | Case tracking (all required fields) | ✅ | `pages/Cases.tsx`, `pages/CaseDetail.tsx`, `GET /api/cases` |
 | R2+ | **Register a complaint** (form with live institution match + overlap preview) and **bulk CSV import** | ✅ | `pages/Register.tsx`, `services.register_complaint()`, `POST /api/complaints*` |
 | R3 | Cross-Bureau overlap detection + linking | ✅ | `backend/app/intel.py`, `pages/Overlaps.tsx`, `pages/Room.tsx` |

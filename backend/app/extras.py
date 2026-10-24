@@ -46,11 +46,16 @@ def nl_search(q: str = "", conn=Depends(db.get_conn)):
 
 
 @router.get("/api/reports/{kind}")
-def report(kind: str, format: str = "json", period: str = "month", conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+def report(kind: str, format: str = "json", period: str = "month",
+           region: str = "", bureau: str = "", date_from: str = "", date_to: str = "",
+           conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
     try:
-        rep = reports.build(kind, conn, ctx, period)
+        rep = reports.build(kind, conn, ctx, period=period, region=region or None,
+                            bureau=bureau or None, date_from=date_from or None, date_to=date_to or None)
     except KeyError:
         raise HTTPException(404, "unknown report")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     if format == "csv":
         return Response(reports.to_csv(rep), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": f'attachment; filename="aicte_{kind}_report.csv"'})
@@ -73,6 +78,23 @@ def export_cases(q: str = "", bureau: str = "", region: str = "", category: str 
     items = [services.serialize_case(r, today, cl, bl) for r in rows]
     return Response(reports.cases_csv(items), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": 'attachment; filename="aicte_cases.csv"'})
+
+
+@router.get("/api/institutions/{id}/history.csv")
+def export_institution_history(id: str, conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    inst = db.one(conn, "SELECT aicte_id, name, region FROM institutions WHERE aicte_id=?", (id,))
+    if not inst:
+        raise HTTPException(404, "Institution not found")
+    if ctx.role == "REGIONAL" and inst["region"] != ctx.region:
+        raise HTTPException(403, "Access denied outside your region")
+    today = db.now(conn).date()
+    rows = db.rows(conn, services.CASE_SELECT + " WHERE c.institution_id=? ORDER BY c.received_on DESC, c.case_id", (id,))
+    cl, bl = services.cluster_map(conn), services.bureau_lookup(conn)
+    items = [services.serialize_case(r, today, cl, bl) for r in rows]
+    content = reports.institution_history_csv(inst, items, conn)
+    filename = f"aicte_{id}_case_history.csv"
+    return Response(content, media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 # ---------------------------------------------------------------- documents ---------

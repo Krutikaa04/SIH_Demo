@@ -1,6 +1,6 @@
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Building2, Mail, MapPin, Phone, Siren, User } from 'lucide-react'
-import { useApi } from '../api'
+import { ArrowLeft, Building2, FileSpreadsheet, Mail, MapPin, Phone, Siren, User } from 'lucide-react'
+import { download, useApi } from '../api'
 import { BureauBadge, Card, ErrorBox, Loading, RISK_COLORS, RiskBadge, SlaChip, StatusChip, cx, fmtDate } from '../ui'
 
 export default function Institution() {
@@ -67,7 +67,18 @@ export default function Institution() {
           <Link to={`/overlaps?open=${cl.cluster_id}`} className="rounded-lg bg-red-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-red-700">Why flagged</Link>
         </div>))}
 
-      <Card title="Consolidated complaint history — all Bureaus" pad={false}>
+      <Card
+        title="Consolidated complaint history — all Bureaus"
+        pad={false}
+        right={
+          <button
+            onClick={() => download(`/institutions/${i.aicte_id}/history.csv`, `${i.aicte_id}_history.csv`)}
+            className="flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+          >
+            <FileSpreadsheet size={13} className="text-emerald-600" /> Export history (CSV)
+          </button>
+        }
+      >
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wider text-slate-400">
             <tr>{['Case ID', 'Category', 'Handled by', 'Status', 'Timeline', 'Last action', 'Received'].map((h) => <th key={h} className="px-4 py-2.5 font-medium">{h}</th>)}</tr></thead>
