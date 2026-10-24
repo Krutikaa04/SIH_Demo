@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import FileResponse, Response
 
-from . import db, events, nlsearch, reports, roles, services
+from . import db, events, nlsearch, reports, roles, services, unmatched
 from .roles import get_ctx
 
 router = APIRouter()
@@ -22,9 +22,12 @@ def complaint_preview(body: dict = Body(...), conn=Depends(db.get_conn), ctx=Dep
 
 @router.post("/api/complaints")
 def register_complaint(body: dict = Body(...), conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    park = bool(body.get("park_unmatched"))
+    if park and ctx.role == "REGIONAL":
+        roles.forbid("Regional Offices cannot save complaints to the review queue")
     try:
         d = services.clean_complaint(conn, body, ctx)
-        return services.register_complaint(conn, d, ctx)
+        return services.register_complaint(conn, d, ctx, park_unmatched=park)
     except services.Unresolved as e:
         raise HTTPException(422, detail={"code": "UNRESOLVED_INSTITUTION", "message": str(e),
                                          "suggestions": e.suggestions})
@@ -34,10 +37,33 @@ def register_complaint(body: dict = Body(...), conn=Depends(db.get_conn), ctx=De
 
 @router.post("/api/complaints/import")
 def import_complaints(body: dict = Body(...), conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    park = bool(body.get("park_unmatched"))
+    if park and ctx.role == "REGIONAL":
+        roles.forbid("Regional Offices cannot save complaints to the review queue")
     try:
-        return services.import_complaints(conn, body.get("csv_text") or "", ctx, bool(body.get("dry_run", True)))
+        return services.import_complaints(conn, body.get("csv_text") or "", ctx, bool(body.get("dry_run", True)), park)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+@router.get("/api/unmatched")
+def unmatched_list(status: str = "OPEN", conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    if status.upper() not in (*unmatched.STATUSES, "ALL"):
+        raise HTTPException(400, "status must be OPEN, RESOLVED, DISCARDED or ALL")
+    return unmatched.list_items(conn, ctx, status)
+
+
+@router.post("/api/unmatched/{queue_id}/resolve")
+def unmatched_resolve(queue_id: str, body: dict = Body(...), conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    try:
+        return unmatched.resolve(conn, ctx, queue_id, body.get("institution_id"))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.delete("/api/unmatched/{queue_id}")
+def unmatched_discard(queue_id: str, reason: str = "", conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    return unmatched.discard(conn, ctx, queue_id, reason)
 
 
 @router.get("/api/search/nl")
