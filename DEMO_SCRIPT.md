@@ -18,7 +18,7 @@ Browser full screen, 100% zoom, role = **Senior Management**.
 | 0:55–1:25 | Click **Why flagged** on the red banner. Click through the three pairs. | "RB's case has no AICTE ID and spells the name 'Govt. College of Engg'. PGRC wrote it in full. The descriptions differ. We still match them, and show *why*: identity, name, text, category, time, with points." | Explainable overlap engine |
 | 1:25–1:55 | **Link cases in Coordination Room** → keep **RB** as lead → type a comment → choose *Merge under lead Bureau* → **Record decision**. | "Instead of two show-cause notices, one lead Bureau, one decision, written into every case's history." Show the dashboard's *effort saved* later. | Coordination Room |
 | 1:55–2:20 | Press **Simulate New Complaint**. The toast pops. Then switch the role dropdown to **Public Grievance Cell**. | "A new complaint arrives with a different spelling and no ID. Detected in under a second. Now I'm PGRC: my desk, and I can't act on RB's case." | Live alert, role switcher |
-| 2:20–2:40 | **Demo ▾ → Time machine: +7 days**. Toast: cases auto-escalated. Open **Cases → status Escalated**, open one: countdown and "System (SLA engine)" row. | "SLA timers on every case. When a timeline is crossed, it escalates by itself: Deputy Director, then Director." | SLA timers, auto-escalation |
+| 2:20–2:40 | **Switch back to Senior Management**, then **Demo ▾ → Time machine: +7 days**. Toast: cases auto-escalated. Open **Cases → status Escalated**, open one: countdown and "System (SLA engine)" row. | "SLA timers on every case. When a timeline is crossed, it escalates by itself: Deputy Director, then Director." | SLA timers, auto-escalation |
 | 2:40–2:55 | **Demo ▾ → Verify audit trail** (green). **Tamper with a record.** **Verify** again (red). | "Every action is hash-chained. Change one record in the database and we see exactly which one." | Tamper-evident audit trail |
 | 2:55–3:00 | **Reports** → **Export PDF**. | "Bureau, region, institution, ageing, disposal rate, overlaps, monthly and quarterly, as CSV or PDF. Offline, explainable, zero paid APIs." | Reports and export |
 
@@ -58,3 +58,7 @@ Browser full screen, 100% zoom, role = **Senior Management**.
 - [ ] Run once with **Wi-Fi off** (the app needs no internet).
 - [ ] Run once on the **second laptop** from the bundle.
 - [ ] Record a clean take as backup.
+
+Demo mutations require `DEMO_MODE=1` and an explicit Senior Management role.
+`python run.py` enables demo mode unless `DEMO_MODE=0` is already set. Other
+roles keep read-only audit verification; switch back to Senior before demo actions.

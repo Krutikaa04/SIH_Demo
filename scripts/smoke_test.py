@@ -39,6 +39,9 @@ def flow(round_no):
     print(f"\n=== Demo flow, round {round_no} ===")
     s, _, _ = call("/admin/reset", "POST")
     check("reset", s == 200)
+    for endpoint in ("/admin/reset", "/admin/clock", "/admin/tamper", "/admin/restore-tamper", "/simulate/complaint"):
+        denied, _, _ = call(endpoint, "POST", {}, role="RB")
+        check(f"demo control denied to Bureau: {endpoint}", denied == 403)
     _, d, _ = call("/dashboard/summary")
     check("300 cases seeded", d["totals"]["received"] == 300, f"({d['totals']['received']})")
     check("11 open overlap clusters", d["overlap"]["open_clusters"] == 11, f"({d['overlap']['open_clusters']})")

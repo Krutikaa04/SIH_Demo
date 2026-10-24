@@ -2,6 +2,7 @@
 
 Seeds the database on first run, then serves the API and the built UI on http://localhost:8000
 """
+import os
 import sys
 import threading
 import time
@@ -15,6 +16,7 @@ PORT = 8000
 
 
 def main():
+    os.environ.setdefault("DEMO_MODE", "1")
     from app import db, seed
 
     if "--reseed" in sys.argv or not db.is_seeded():
