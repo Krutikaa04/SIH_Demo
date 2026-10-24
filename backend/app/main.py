@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import db, events, extras, reports, risk, roles, seed, services, sla
+from . import db, events, extras, reports, risk, roles, seed, services, sla, galaxy, briefings
 from .constants import (BUREAUS, BUREAU_ORDER, CATEGORIES, OPEN_STATUSES, REGION_STATES, SLA_DAYS, STATUSES)
 from .roles import get_ctx
 
@@ -385,6 +385,48 @@ def overlap_pair(pair_id: str, conn=Depends(db.get_conn)):
     return v
 
 
+@app.post("/api/overlaps/{pair_id}/review")
+def review_overlap_pair(pair_id: str, body: dict = Body(...), conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    decision = (body.get("decision") or "").upper()
+    rationale = (body.get("rationale") or "").strip()
+    if decision not in ("CONFIRMED", "REJECTED", "DEFERRED"):
+        raise HTTPException(400, "Decision must be CONFIRMED, REJECTED, or DEFERRED")
+    if not rationale:
+        raise HTTPException(422, "Mandatory review rationale is required")
+    p = db.one(conn, "SELECT * FROM overlap_pairs WHERE id=?", (pair_id,))
+    if not p:
+        raise HTTPException(404, "Pair not found")
+    
+    now_iso = db.iso(db.now(conn))
+    P = ctx.persona
+    actor_id, actor_name, actor_bureau = P[0], P[1], P[2]
+    
+    conn.execute(
+        "UPDATE overlap_pairs SET status=?, review_rationale=?, review_by=?, review_at=? WHERE id=?",
+        (decision, rationale, actor_name, now_iso, pair_id)
+    )
+    # Record in cryptographic audit trail for primary case
+    db.append_action(
+        conn, p["case_a"], now_iso, actor_id, actor_name, actor_bureau,
+        f"OVERLAP_{decision}", None, None,
+        f"Overlap with {p['case_b']} reviewed as {decision}. Reason: {rationale}"
+    )
+    conn.commit()
+    events.publish("dashboard.invalidate", {})
+    return {"ok": True, "pair_id": pair_id, "status": decision, "review_rationale": rationale, "review_by": actor_name, "review_at": now_iso}
+
+
+@app.get("/api/galaxy/graph")
+def galaxy_graph(bureau: str = Query(default=None), conn=Depends(db.get_conn)):
+    return galaxy.generate_galaxy_graph(conn, bureau_filter=bureau)
+
+
+@app.get("/api/briefings/executive")
+def executive_briefing(conn=Depends(db.get_conn)):
+    return briefings.generate_executive_briefing(conn)
+
+
+
 # ------------------------------------------------------------------ rooms ----------
 
 def _room_view(conn, rid):
@@ -584,12 +626,34 @@ def tamper(body: dict = Body(default={}), conn=Depends(db.get_conn)):
         r = conn.execute("SELECT case_id FROM action_history GROUP BY case_id HAVING COUNT(*)>=3 "
                          "ORDER BY case_id LIMIT 1").fetchone()
         case_id = r[0]
-    row = db.one(conn, "SELECT id FROM action_history WHERE case_id=? AND seq=?", (case_id, seq))
+    row = db.one(conn, "SELECT id, remarks FROM action_history WHERE case_id=? AND seq=?", (case_id, seq))
     if not row:
         raise HTTPException(404, "record not found")
+    # Store backup for restore & re-verify
+    db.set_setting(conn, "tamper_backup_" + str(row["id"]), row["remarks"])
+    db.set_setting(conn, "tampered_row_id", str(row["id"]))
     conn.execute("UPDATE action_history SET remarks='Complaint closed without any action' WHERE id=?", (row["id"],))
     conn.commit()
+    events.publish("dashboard.invalidate", {})
     return {"case_id": case_id, "seq": seq}
+
+
+@app.post("/api/admin/restore-tamper")
+def restore_tamper(conn=Depends(db.get_conn)):
+    """Restores the tampered record to its original pristine state and re-verifies the chain."""
+    row_id = db.get_setting(conn, "tampered_row_id")
+    if not row_id:
+        v = db.verify_chain(conn)
+        return {"restored": False, "message": "No active tamper record registered", "verification": v}
+    orig = db.get_setting(conn, "tamper_backup_" + row_id)
+    if orig is not None:
+        conn.execute("UPDATE action_history SET remarks=? WHERE id=?", (orig, int(row_id)))
+        db.set_setting(conn, "tampered_row_id", "")
+        conn.commit()
+    events.publish("dashboard.invalidate", {})
+    v = db.verify_chain(conn)
+    return {"restored": True, "verification": v}
+
 
 
 @app.get("/api/events")

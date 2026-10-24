@@ -4,21 +4,137 @@ import { ArrowRight, GitMerge, HelpCircle, Users } from 'lucide-react'
 import { post, useApi } from '../api'
 import { BandBadge, BureauBadge, Card, Drawer, ErrorBox, Loading, ScoreRing, StatusChip, cx, fmtDate } from '../ui'
 
-export function BreakdownView({ pair, bureauOf }: { pair: any; bureauOf: (id: string) => string }) {
+export function BreakdownView({ pair, bureauOf, onReviewed }: { pair: any; bureauOf: (id: string) => string; onReviewed?: () => void }) {
   const [showText, setShowText] = useState(false)
+  const [reviewDecision, setReviewDecision] = useState<'CONFIRMED' | 'REJECTED' | 'DEFERRED' | null>(null)
+  const [rationale, setRationale] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [currentStatus, setCurrentStatus] = useState<string>(pair.status || 'OPEN')
+  const [savedRationale, setSavedRationale] = useState<string>(pair.review_rationale || '')
+
+  useEffect(() => {
+    setCurrentStatus(pair.status || 'OPEN')
+    setSavedRationale(pair.review_rationale || '')
+    setReviewDecision(null)
+    setRationale('')
+  }, [pair.id, pair.status, pair.review_rationale])
+
+  async function submitReview() {
+    if (!reviewDecision || !rationale.trim()) return
+    setBusy(true)
+    try {
+      const res = await post(`/overlaps/${pair.id}/review`, {
+        decision: reviewDecision,
+        rationale: rationale.trim(),
+      })
+      setCurrentStatus(res.status)
+      setSavedRationale(res.review_rationale)
+      setReviewDecision(null)
+      setRationale('')
+      if (onReviewed) onReviewed()
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-4 rounded-xl bg-slate-50 p-4">
         <ScoreRing score={pair.score} band={pair.band} size={76} />
-        <div className="min-w-0">
-          <BandBadge band={pair.band} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <BandBadge band={pair.band} />
+            <span className={cx(
+              'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase',
+              currentStatus === 'CONFIRMED' ? 'bg-emerald-100 text-emerald-800' :
+              currentStatus === 'REJECTED' ? 'bg-red-100 text-red-800' :
+              currentStatus === 'DEFERRED' ? 'bg-slate-200 text-slate-700' :
+              currentStatus === 'LINKED' ? 'bg-indigo-100 text-indigo-800' :
+              'bg-amber-100 text-amber-800'
+            )}>
+              {currentStatus}
+            </span>
+          </div>
           <div className="mt-1.5 text-sm font-semibold text-slate-800">{pair.headline}</div>
           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
             <BureauBadge code={bureauOf(pair.case_a)} /> <span className="font-mono">{pair.case_a}</span>
             <span>↔</span>
             <BureauBadge code={bureauOf(pair.case_b)} /> <span className="font-mono">{pair.case_b}</span>
           </div>
+          {savedRationale && (
+            <div className="mt-2 rounded-lg bg-white p-2 text-xs text-slate-600 ring-1 ring-slate-200">
+              <span className="font-semibold text-slate-700">Recorded Rationale:</span> {savedRationale}
+            </div>
+          )}
         </div>
+      </div>
+
+      {/* Per-Pair Human-in-the-Loop Review Box */}
+      <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm space-y-3">
+        <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+          <span>Official Investigator Review</span>
+          <span className="text-[11px] text-slate-400">Recorded in SHA-256 Audit Trail</span>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            onClick={() => setReviewDecision('CONFIRMED')}
+            className={cx(
+              'rounded-lg border px-2 py-1.5 text-xs font-semibold transition',
+              reviewDecision === 'CONFIRMED'
+                ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm'
+                : 'border-slate-200 text-emerald-700 hover:bg-emerald-50'
+            )}>
+            Confirm Link
+          </button>
+          <button
+            onClick={() => setReviewDecision('REJECTED')}
+            className={cx(
+              'rounded-lg border px-2 py-1.5 text-xs font-semibold transition',
+              reviewDecision === 'REJECTED'
+                ? 'border-red-600 bg-red-600 text-white shadow-sm'
+                : 'border-slate-200 text-red-700 hover:bg-red-50'
+            )}>
+            Not Related
+          </button>
+          <button
+            onClick={() => setReviewDecision('DEFERRED')}
+            className={cx(
+              'rounded-lg border px-2 py-1.5 text-xs font-semibold transition',
+              reviewDecision === 'DEFERRED'
+                ? 'border-slate-600 bg-slate-700 text-white shadow-sm'
+                : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+            )}>
+            Defer Review
+          </button>
+        </div>
+
+        {reviewDecision && (
+          <div className="space-y-2 pt-1 border-t border-slate-100">
+            <label className="block text-[11px] font-semibold text-slate-600">
+              Mandatory Review Rationale for <span className="font-bold text-navy">{reviewDecision}</span>:
+            </label>
+            <textarea
+              value={rationale}
+              onChange={(e) => setRationale(e.target.value)}
+              placeholder="Provide evidence-based justification for this finding (required)..."
+              rows={2}
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs outline-none focus:border-navy-2 focus:bg-white"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => { setReviewDecision(null); setRationale('') }}
+                className="rounded-lg px-2.5 py-1 text-xs text-slate-500 hover:bg-slate-100">
+                Cancel
+              </button>
+              <button
+                onClick={submitReview}
+                disabled={busy || !rationale.trim()}
+                className="rounded-lg bg-navy px-3.5 py-1 text-xs font-semibold text-white shadow-sm hover:bg-navy-2 disabled:opacity-50">
+                {busy ? 'Saving to Ledger...' : 'Commit Decision to Audit Vault'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div>
@@ -47,6 +163,7 @@ export function BreakdownView({ pair, bureauOf }: { pair: any; bureauOf: (id: st
     </div>
   )
 }
+
 
 export function ClusterDrawer({ cluster, onClose }: { cluster: any; onClose: () => void }) {
   const [sel, setSel] = useState(0)

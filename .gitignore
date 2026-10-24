@@ -2,8 +2,15 @@ __pycache__/
 *.pyc
 data/demo.db
 data/demo.db-journal
+backend/*.db*
+*.db
+*.db-shm
+*.db-wal
 frontend/node_modules/
+frontend/.next/
+frontend/next-env.d.ts
 .venv/
 data/uploads/
 vendor/
 *.zip
+

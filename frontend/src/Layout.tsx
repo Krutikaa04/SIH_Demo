@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Bell, BarChart3, FilePlus2, Building2, FolderOpen, GitMerge, LayoutDashboard, FlaskConical, Search, Zap, RotateCcw, FastForward, ChevronDown, ShieldCheck, ShieldAlert, UserCog, Clock3 } from 'lucide-react'
+import { Bell, BarChart3, FilePlus2, Building2, FolderOpen, GitMerge, LayoutDashboard, FlaskConical, Search, Zap, RotateCcw, FastForward, ChevronDown, ShieldCheck, ShieldAlert, UserCog, Clock3, Share2, FileText } from 'lucide-react'
 import { post, api, setRole, useApi, useRole } from './api'
 import { useToast } from './toast'
 import { ago, cx } from './ui'
@@ -10,10 +10,13 @@ const NAV = [
   { to: '/cases', label: 'Cases', icon: FolderOpen },
   { to: '/register', label: 'Register complaint', icon: FilePlus2 },
   { to: '/overlaps', label: 'Overlaps', icon: GitMerge, badge: 'overlaps' },
+  { to: '/galaxy', label: 'Connection Galaxy', icon: Share2 },
   { to: '/institutions', label: 'Institutions', icon: Building2 },
+  { to: '/briefings', label: 'Executive Briefing', icon: FileText },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
   { to: '/alerts', label: 'Alerts', icon: Bell, badge: 'alerts' },
 ]
+
 
 export default function Layout() {
   const nav = useNavigate()
@@ -84,6 +87,24 @@ export default function Layout() {
     const r = await post('/admin/tamper', m ? { case_id: decodeURIComponent(m[1]), seq: 2 } : {})
     push({ kind: 'warn', title: 'Demo: a record was altered', body: <span className="text-slate-600">Record #{r.seq} of {r.case_id} was changed directly in the database. Now run “Verify audit trail”.</span> })
   }
+  async function restoreTamper() {
+    setDemo(false)
+    const r = await post('/admin/restore-tamper')
+    if (r.restored && r.verification?.ok) {
+      push({
+        kind: 'info',
+        title: 'Audit Vault Restored & Re-Verified',
+        body: <span className="text-slate-600">Tampered record restored to pristine state. {r.verification.checked} records mathematically verified.</span>
+      })
+    } else {
+      push({
+        kind: 'info',
+        title: 'Audit Vault Status',
+        body: <span className="text-slate-600">{r.message || `${r.verification?.checked} records verified.`}</span>
+      })
+    }
+  }
+
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -190,8 +211,10 @@ export default function Layout() {
                   <div className="my-1 border-t border-slate-100" />
                   <button onClick={verifyAll} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-slate-50"><ShieldCheck size={15} className="text-emerald-600" /> Verify audit trail</button>
                   <button onClick={tamper} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-slate-50"><ShieldAlert size={15} className="text-red-600" /> Tamper with a record</button>
+                  <button onClick={restoreTamper} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-slate-50"><RotateCcw size={15} className="text-emerald-600" /> Restore &amp; re-verify</button>
                   <div className="my-1 border-t border-slate-100" />
                   <button onClick={reset} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-slate-50"><RotateCcw size={15} className="text-slate-500" /> Reset demo data</button>
+
                   <div className="px-3 pb-1.5 pt-1 text-[11px] text-slate-400">Shortcut: Ctrl+Shift+D · Viewing as {roleLabel}</div>
                 </div>)}
             </div>

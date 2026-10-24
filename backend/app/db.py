@@ -47,6 +47,7 @@ CREATE TABLE overlap_pairs (
   id TEXT PRIMARY KEY, case_a TEXT, case_b TEXT, institution_id TEXT, type TEXT,
   score REAL, band TEXT, breakdown TEXT, explanation TEXT, headline TEXT,
   cluster_id TEXT, status TEXT DEFAULT 'OPEN', detected_at TEXT,
+  review_rationale TEXT, review_by TEXT, review_at TEXT,
   UNIQUE(case_a, case_b)
 );
 CREATE TABLE coordination_rooms (
@@ -77,6 +78,12 @@ def connect():
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("ALTER TABLE overlap_pairs ADD COLUMN review_rationale TEXT")
+        conn.execute("ALTER TABLE overlap_pairs ADD COLUMN review_by TEXT")
+        conn.execute("ALTER TABLE overlap_pairs ADD COLUMN review_at TEXT")
+    except sqlite3.OperationalError:
+        pass
     return conn
 
 

@@ -15,6 +15,8 @@ import Institution from './pages/Institution'
 import Alerts from './pages/Alerts'
 import Reports from './pages/Reports'
 import Register from './pages/Register'
+import Galaxy from './pages/Galaxy'
+import Briefings from './pages/Briefings'
 
 startEvents()
 
@@ -29,8 +31,10 @@ createRoot(document.getElementById('root')!).render(
             <Route path="cases/*" element={<CaseDetail />} />
             <Route path="overlaps" element={<Overlaps />} />
             <Route path="rooms/:id" element={<Room />} />
+            <Route path="galaxy" element={<Galaxy />} />
             <Route path="institutions" element={<Institutions />} />
             <Route path="institutions/:id" element={<Institution />} />
+            <Route path="briefings" element={<Briefings />} />
             <Route path="alerts" element={<Alerts />} />
             <Route path="reports" element={<Reports />} />
             <Route path="register" element={<Register />} />
@@ -40,3 +44,4 @@ createRoot(document.getElementById('root')!).render(
     </BrowserRouter>
   </StrictMode>,
 )
+

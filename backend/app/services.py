@@ -146,7 +146,10 @@ def pair_view(p):
     return {"id": p["id"], "cluster_id": p["cluster_id"], "type": p["type"], "score": p["score"], "band": p["band"],
             "case_a": p["case_a"], "case_b": p["case_b"], "headline": p["headline"], "status": p["status"],
             "breakdown": json.loads(p["breakdown"]), "explanation": p["explanation"],
-            "detected_at": p["detected_at"]}
+            "detected_at": p["detected_at"],
+            "review_rationale": p.get("review_rationale") if isinstance(p, dict) else (p["review_rationale"] if "review_rationale" in p.keys() else None),
+            "review_by": p.get("review_by") if isinstance(p, dict) else (p["review_by"] if "review_by" in p.keys() else None),
+            "review_at": p.get("review_at") if isinstance(p, dict) else (p["review_at"] if "review_at" in p.keys() else None)}
 
 
 def clusters_view(conn, only_active=True):
