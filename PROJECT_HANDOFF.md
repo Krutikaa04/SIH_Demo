@@ -197,8 +197,12 @@ Background cases are generated with an **exact collision check** using the real 
 | Text similarity | 25 | TF-IDF cosine (1–2-grams, sublinear tf, domain synonym map e.g. teacher/staff→faculty, fees/refund→fee): `25 × min(1, cosine / 0.10)` |
 | Category | 15 | same category 15 · same category group 9 · shared inferred topic 6 · else 0 |
 | Time window | 15 | ≤30 days apart = 15, linearly to 0 at 180 days |
+| Shared references and amounts | 10 bonus | shared normalized rupee amount +4; exact circular/reference +6; exact roll/registration number +6; combined bonus capped at 10 and available headroom below 100 |
 
 - **Topic gate:** discard if `text_pts + category_pts < 10`.
+- **Entity evidence:** the sixth `entities` signal is always present (zero points without a shared value), with the actual matched amounts/references in its detail. It cannot bypass the institution or topic checks. The original five weights stay unchanged; the rounded score remains capped at 100. Register previews and overlap explanations show the evidence.
+- **Evaluation and limits:** [Entity evaluation](docs/ENTITY_EVALUATION.md) records the scoring decision, reproducible planted-positive/decoy precision and recall, extraction bounds and synthetic-data limitations. Shared amounts/references support review; they do not prove a shared incident or represent a probability.
+- **Existing data:** new complaints and previews use the signal immediately. Stored pair scores are retained; re-seed the synthetic demo (`python run.py --reseed`) to see the Kochi 69→73 promotion and same-amount unrelated-topic decoy.
 - **Bands:** ≥70 **HIGH** ("Potential Overlapping Cases - Coordination Required") · 50–69 **MEDIUM** ("Possible Overlap - Review Recommended") · <50 discarded.
 - **Type:** different current Bureaus → `CROSS_BUREAU`; same Bureau → `DUPLICATE`.
 - **Candidates** (`detect`): same `institution_id`, other case is open **or disposed within 90 days**.
