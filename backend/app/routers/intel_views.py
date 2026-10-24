@@ -14,4 +14,3 @@ def galaxy_graph(bureau: str = Query(default=None), conn=Depends(db.get_conn)):
 @router.get("/api/briefings/executive")
 def executive_briefing(conn=Depends(db.get_conn)):
     return briefings.generate_executive_briefing(conn)
-
