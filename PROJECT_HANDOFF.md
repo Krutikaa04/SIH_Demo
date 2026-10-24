@@ -10,7 +10,7 @@
 - **State:** the planned scope (P0 + P1 + P2) is **built and rehearsed**, plus two post-review additions: **complaint registration / CSV import** and a **coordination guard** (see §2). 23 automated tests and a full-flow smoke test pass. The demo is ready; what remains is polish/extension (see [§13](#13-not-built--known-limitations) and [§14](#14-suggested-backlog-for-the-team)).
 - **Run it:**
   ```bash
-  pip install -r requirements.txt     # first time only (Python 3.11+, tested on 3.13)
+  pip install -r requirements.txt     # first time only (Python 3.12+, tested on 3.13)
   python run.py                       # seeds data on first run, opens http://127.0.0.1:8000
   ```
   Use **`127.0.0.1`**, not `localhost` (on Windows `localhost` can add ~2 s per request). Node is **not** needed to run — the built UI is in `frontend/dist`.
@@ -101,7 +101,7 @@ Legend: ✅ built and tested · 🟡 built, simplified on purpose (LITE) · 🎭
                                                                                  │ data/demo.db (+ data/uploads/)
 ```
 
-**Stack:** Python 3.11+ (FastAPI, uvicorn, rapidfuzz, scikit-learn) · SQLite · React + Vite + TypeScript (strict off) + Tailwind 4 + Recharts + d3-geo + jsPDF/autotable + lucide-react. Fonts (`@fontsource-variable/inter`) and the India GeoJSON are bundled — **no CDN, no internet at runtime**.
+**Stack:** Python 3.12+ (FastAPI, uvicorn, rapidfuzz, scikit-learn) · SQLite · React + Vite + TypeScript (strict off) + Tailwind 4 + Recharts + d3-geo + jsPDF/autotable + lucide-react. Fonts (`@fontsource-variable/inter`) and the India GeoJSON are bundled — **no CDN, no internet at runtime**.
 
 ### Repository map
 ```
@@ -446,3 +446,19 @@ explicitly supplies the Senior role. Missing/invalid role headers cannot inherit
 get_ctx's permissive default for these routes. `/api/meta` includes `demo_mode`;
 the UI hides mutation controls and their shortcut for other sessions. Audit verify
 remains read-only and available. This gate is not authentication; issue #22 owns it.
+
+## Automated PR checks
+
+`.github/workflows/ci.yml` runs backend tests with coverage, frontend typecheck/lint/
+component tests/build, and an isolated full smoke test on GitHub-hosted runners.
+The final `ci` job fails if any prerequisite fails, is cancelled or is skipped.
+Use `python scripts/ci_smoke.py` locally with port 8000 free. Runtime and development
+constraints are pinned separately; Python 3.12+ is required by the selected versions,
+and CI exercises Python 3.13 / Node 24. The runtime wheelhouse is refreshed during
+bundle creation; CI proves the no-index installation on its runner platform. Windows
+bundles still need to be prepared on their target platform. Branch protection and
+CODEOWNERS remain team decisions; no repository settings are changed by this work.
+
+Windows CI also builds the actual bundle and runs its batch launcher from the
+extracted copy in an empty Python environment with Node absent from PATH. The
+aggregate check requires this bundle job in addition to backend/frontend/smoke.
