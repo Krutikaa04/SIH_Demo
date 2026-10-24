@@ -88,8 +88,16 @@ def list_cases(q: str = "", bureau: str = "", region: str = "", category: str = 
     where, params = services.case_where(today, q, bureau, region, category, status, institution_id, date_from,
                                         date_to, overdue, overlap, nearing, age_gt, age_lt)
     w = ("WHERE " + " AND ".join(where)) if where else ""
-    order = {"received_desc": "c.received_on DESC, c.case_id", "received_asc": "c.received_on ASC, c.case_id",
-             "due_asc": "c.due_date ASC", "severity_desc": "c.severity DESC, c.received_on"}.get(sort, "c.received_on DESC")
+    order = {
+        "received_desc": "c.received_on DESC, c.case_id",
+        "received_asc": "c.received_on ASC, c.case_id",
+        "due_asc": "c.due_date ASC",
+        "due_desc": "c.due_date DESC",
+        "severity_desc": "c.severity DESC, c.received_on",
+        "severity_asc": "c.severity ASC, c.received_on",
+        "last_action_desc": "c.last_action_at DESC",
+        "last_action_asc": "c.last_action_at ASC",
+    }.get(sort, "c.received_on DESC")
     total = conn.execute(f"SELECT COUNT(*) FROM cases c LEFT JOIN institutions i ON i.aicte_id=c.institution_id {w}",
                          params).fetchone()[0]
     page_size = max(1, min(page_size, 200))
