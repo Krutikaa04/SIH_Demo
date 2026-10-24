@@ -162,6 +162,7 @@ export default function Cases() {
                     <th scope="col" className="hidden sm:table-cell px-4 py-2.5 font-medium">Category</th>
                     <th scope="col" className="px-4 py-2.5 font-medium">Handled by</th>
                     <th scope="col" className="px-4 py-2.5 font-medium">Status</th>
+                    <SortTh label="Severity" sortKey="severity" currentSort={currentSort} onSort={(s) => set('sort', s)} className="hidden sm:table-cell" />
                     <th scope="col" className="hidden xl:table-cell px-4 py-2.5 font-medium">Officer</th>
                     <th scope="col" className="hidden md:table-cell px-4 py-2.5 font-medium">Last action</th>
                     <th scope="col" className="hidden lg:table-cell px-4 py-2.5 font-medium">Next action</th>
@@ -188,6 +189,12 @@ export default function Cases() {
                         </div>
                       </td>
                       <td className="px-4 py-3"><StatusChip status={c.status} /></td>
+                      <td className="hidden sm:table-cell px-4 py-3">
+                        <span className={cx('inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-semibold num',
+                          c.severity >= 4 ? 'bg-red-50 text-red-700 ring-1 ring-red-200' : c.severity === 3 ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200' : 'bg-slate-50 text-slate-600 ring-1 ring-slate-200')}>
+                          {c.severity} / 5
+                        </span>
+                      </td>
                       <td className="hidden xl:table-cell whitespace-nowrap px-4 py-3 text-slate-600">{c.assigned_officer.name}</td>
                       <td className="hidden md:table-cell max-w-[200px] px-4 py-3">
                         <div className="truncate font-medium text-slate-700" title={c.last_action || '—'}>{c.last_action || '—'}</div>
@@ -201,7 +208,7 @@ export default function Cases() {
                       <td className="px-4 py-3"><SlaChip sla={c.sla} /></td>
                       <td className="whitespace-nowrap px-4 py-3 text-slate-500">{fmtDate(c.received_on)}</td>
                     </tr>))}
-                  {data.items.length === 0 && <tr><td colSpan={10} className="p-10 text-center text-slate-400">No cases match these filters.</td></tr>}
+                  {data.items.length === 0 && <tr><td colSpan={11} className="p-10 text-center text-slate-400">No cases match these filters.</td></tr>}
                 </tbody>
               </table>
             </div>
