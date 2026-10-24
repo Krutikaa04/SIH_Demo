@@ -17,7 +17,7 @@ Options: `python run.py --reseed` (rebuild the demo data), `python run.py --no-b
 
 The built UI is committed in `frontend/dist`, so Node is **not** needed to run the demo.
 
-## Develop the UI (optional, needs Node 20+)
+## Develop the UI (optional, needs Node 24)
 
 ```bash
 cd frontend
@@ -107,3 +107,27 @@ and require an explicit `X-Role: SENIOR` while on (403 otherwise). The UI displa
 these controls only for Senior Management in demo mode. Read-only audit verification
 remains available. These checks reuse the prototype role switcher; authenticated
 sessions are tracked separately in issue #22.
+
+## Continuous integration and reproducible installs
+
+GitHub Actions runs `backend`, `frontend` and `smoke` on every PR, including stacked
+PRs, and pushes to `master`. The aggregate `ci` check succeeds only when all three
+jobs pass. CI uses Python 3.13 and Node 24. Locally, the pinned Python dependencies
+require Python 3.12 or newer. Install with
+`python -m pip install -r requirements.txt -r requirements-dev.txt`.
+Runtime and test constraints are committed as `requirements.lock` and
+`requirements-dev.lock`; direct dependencies remain readable in their `.txt` files.
+Update locks from a clean environment and rerun all checks when changing versions.
+
+`python scripts/ci_smoke.py` starts `run.py --no-browser` with a temporary database,
+waits for `/api/clock`, runs the two-round smoke suite, propagates failures and stops
+the server. Port 8000 must be free. The frontend CI job uploads a fresh `frontend-dist`
+artifact used by smoke testing; committed dist remains unchanged as a policy pending #7.
+CI also downloads the pinned runtime wheelhouse and verifies a fresh installation
+with `pip install --no-index --find-links vendor/wheels -r requirements.txt`.
+Wheelhouses must be prepared for the target OS and Python version. The PowerShell
+bundle script refreshes the required wheels rather than reusing an unchecked cache.
+
+Maintainers can require the aggregate `ci` status check in a branch-protection rule
+for `master`; repository settings are managed by the team. CODEOWNERS is deferred
+until the team agrees on owners.

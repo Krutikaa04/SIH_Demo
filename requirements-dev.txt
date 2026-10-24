@@ -1,3 +1,5 @@
-pytest>=8.0
-httpx>=0.28
-pytest-cov>=6.0
+-c requirements-dev.lock
+pytest==9.1.1
+httpx==0.28.1
+pytest-cov==7.1.0
+pytest-randomly==5.0.0
