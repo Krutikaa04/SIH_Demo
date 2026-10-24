@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, CheckCircle2, Crown, GitMerge, Send, Split, Users } from 'lucide-react'
-import { post, useApi, useRole } from '../api'
+import { ArrowLeft, CheckCircle2, Crown, GitMerge, Plus, Send, Split, Unlink, Users } from 'lucide-react'
+import { api, post, useApi, useRole } from '../api'
 import { BureauBadge, Card, ErrorBox, Loading, ScoreRing, StatusChip, cx, fmtTs } from '../ui'
 import { BreakdownView } from './Overlaps'
 
@@ -19,6 +19,13 @@ export default function Room() {
   const [outcome, setOutcome] = useState('MERGE')
   const [note, setNote] = useState('')
   const [pairSel, setPairSel] = useState(0)
+  const [adding, setAdding] = useState(false)
+  const [find, setFind] = useState('')
+  const [reason, setReason] = useState('')
+  const [removeReason, setRemoveReason] = useState('')
+  const [removing, setRemoving] = useState<string | null>(null)
+  const [memberErr, setMemberErr] = useState('')
+  const { data: pool } = useApi<any>(adding && r ? `/cases?institution_id=${encodeURIComponent(r.institution.aicte_id)}&page_size=200` : null, false)
   if (loading && !r) return <Loading />
   if (error && !r) return <ErrorBox msg={error} />
   const decided = !!r.decision
@@ -26,6 +33,24 @@ export default function Room() {
   const bureaus: string[] = Array.from(new Set(r.cases.map((c: any) => c.bureau)))
   const canLead = me.role === 'SENIOR' || bureaus.includes(me.role)
   const bureauOf = (cid: string) => r.cases.find((c: any) => c.case_id === cid)?.bureau || ''
+  const canManage = !!r.can_manage_members
+  const members = new Set<string>(r.cases.map((c: any) => c.case_id))
+  const needle = find.trim().toLowerCase()
+  const candidates = (pool?.items || []).filter((c: any) => !members.has(c.case_id) &&
+    (!needle || `${c.case_id} ${c.category} ${c.bureau}`.toLowerCase().includes(needle)))
+
+  async function addCase(caseId: string) {
+    setMemberErr('')
+    try { await post(`/rooms/${id}/cases`, { case_id: caseId, rationale: reason }); setReason(''); setFind(''); reload() }
+    catch (e: any) { setMemberErr(e.message) }
+  }
+  async function removeCase(caseId: string) {
+    setMemberErr('')
+    try {
+      await api(`/rooms/${id}/cases/${encodeURIComponent(caseId)}?reason=${encodeURIComponent(removeReason)}`, { method: 'DELETE' })
+      setRemoving(null); setRemoveReason(''); reload()
+    } catch (e: any) { setMemberErr(e.message) }
+  }
 
   async function send() {
     if (!comment.trim()) return
@@ -46,8 +71,12 @@ export default function Room() {
       </div>
 
       <div className="grid gap-5 lg:grid-cols-3">
-        <div className="space-y-5 lg:col-span-2">
-          <Card title="1 · Linked cases">
+        <div className="min-w-0 space-y-5 lg:col-span-2">
+          <Card title="1 · Linked cases"
+            right={canManage ? (
+              <button onClick={() => { setAdding((v) => !v); setMemberErr('') }}
+                className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                <Plus size={13} /> {adding ? 'Close' : 'Add case'}</button>) : undefined}>
             <ul className="divide-y divide-slate-100">
               {r.cases.map((c: any) => (
                 <li key={c.case_id} className="flex flex-wrap items-center gap-3 py-2.5 text-sm">
@@ -58,8 +87,43 @@ export default function Room() {
                   <span className="flex-1 truncate text-slate-500">{c.category}</span>
                   <StatusChip status={c.status} />
                   <span className="text-xs text-slate-400">{c.assigned_officer.name}</span>
+                  {canManage && r.cases.length > 2 && (
+                    <button title="Remove from this room" aria-label={`Remove ${c.case_id} from this room`}
+                      onClick={() => { setRemoving(removing === c.case_id ? null : c.case_id); setRemoveReason(''); setMemberErr('') }}
+                      className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"><Unlink size={14} /></button>)}
+                  {removing === c.case_id && (
+                    <div className="flex w-full items-center gap-2 rounded-lg bg-red-50 p-2">
+                      <input value={removeReason} onChange={(e) => setRemoveReason(e.target.value)} placeholder="Why is this case unrelated? (optional)"
+                        className="flex-1 rounded-md border border-red-200 bg-white px-2.5 py-1.5 text-xs outline-none" />
+                      <button onClick={() => removeCase(c.case_id)} className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700">Remove</button>
+                      <button onClick={() => setRemoving(null)} className="rounded-md px-2 py-1.5 text-xs text-slate-500 hover:bg-white">Cancel</button>
+                    </div>)}
                 </li>))}
             </ul>
+            {memberErr && <div className="mt-3 rounded-lg bg-red-50 p-2.5 text-xs text-red-700">{memberErr}</div>}
+            {adding && canManage && (
+              <div className="mt-3 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="text-xs font-semibold text-slate-700">Add a case of {r.institution.name}</div>
+                <input value={find} onChange={(e) => setFind(e.target.value)} placeholder="Search by case ID, category or Bureau…"
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-navy-2" />
+                <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason for linking (optional, recorded on the case)"
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-navy-2" />
+                <ul className="max-h-56 divide-y divide-slate-100 overflow-auto rounded-lg bg-white ring-1 ring-slate-200">
+                  {candidates.length === 0 && <li className="p-3 text-xs text-slate-400">{pool ? 'No other cases of this institution match.' : 'Loading…'}</li>}
+                  {candidates.map((c: any) => {
+                    const elsewhere = c.overlap?.room_id && c.overlap.room_id !== r.id ? c.overlap.room_id : null
+                    return (
+                      <li key={c.case_id} className="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-3 py-2 text-sm">
+                        <BureauBadge code={c.bureau} />
+                        <span className="font-mono text-xs font-semibold text-navy-2">{c.case_id}</span>
+                        <span className="min-w-0 flex-1 truncate text-xs text-slate-500">{c.category}</span>
+                        <StatusChip status={c.status} />
+                        {elsewhere ? <span className="text-[11px] text-slate-400">in {elsewhere}</span> : (
+                          <button onClick={() => addCase(c.case_id)} className="rounded-md bg-navy px-2.5 py-1 text-xs font-semibold text-white hover:bg-navy-2">Add</button>)}
+                      </li>)
+                  })}
+                </ul>
+              </div>)}
           </Card>
 
           <Card title="2 · Choose the lead Bureau">
@@ -121,9 +185,10 @@ export default function Room() {
               <div className="mb-3 flex flex-wrap gap-1.5">
                 {r.pairs.map((p: any, i: number) => (
                   <button key={p.id} onClick={() => setPairSel(i)} className={cx('rounded-md border px-2 py-1 text-[11px] font-medium', i === pairSel ? 'border-navy bg-navy text-white' : 'border-slate-200 text-slate-600')}>
-                    {bureauOf(p.case_a)}↔{bureauOf(p.case_b)} {Math.round(p.score)}%</button>))}
+                    {bureauOf(p.case_a)}↔{bureauOf(p.case_b)} {p.type === 'MANUAL' ? 'manual' : `${Math.round(p.score)}%`}</button>))}
               </div>)}
-            <BreakdownView pair={r.pairs[pairSel] || r.pairs[0]} bureauOf={bureauOf} />
+            {r.pairs.length > 0 ? <BreakdownView pair={r.pairs[pairSel] || r.pairs[0]} bureauOf={bureauOf} />
+              : <p className="text-sm text-slate-400">No link evidence recorded for this room.</p>}
           </Card>
           <Card title="Combined timeline">
             <ol className="max-h-[480px] space-y-3 overflow-auto pr-1">

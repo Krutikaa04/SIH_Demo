@@ -32,7 +32,7 @@ Run the backend in another terminal with `python run.py --no-browser`.
 
 - Seeded database: 60 institutions, 300 cases, 8 regions, planted overlaps, decoys and SLA cases
 - Explainable overlap engine (identity, fuzzy name, TF-IDF text, category, time window) with a "Why flagged" breakdown
-- Coordination Room: link cases, pick lead Bureau, comment, record decision
+- Coordination Room: link cases (detected or manual), add/remove cases, pick lead Bureau, comment, record decision
 - Dashboard with KPIs, charts, ageing, trend, risk-ranked institutions and live activity
 - **Simulate New Complaint** button: files a scripted complaint through the real pipeline and fires a live alert
 - **SLA engine & Simulated Outbox**: countdown timers, 75% warnings, auto-escalation at 100% (Deputy Director) and 150% (Director),

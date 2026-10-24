@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import db, events, extras, intel, reports, risk, roles, seed, services, sla, galaxy, briefings, notify
+from . import db, events, extras, intel, links, reports, risk, roles, seed, services, sla, galaxy, briefings, notify
 from .constants import (BUREAUS, BUREAU_ORDER, CATEGORIES, OPEN_STATUSES, REGION_STATES, SLA_DAYS, STATUSES)
 from .roles import get_ctx
 
@@ -451,7 +451,7 @@ def executive_briefing(conn=Depends(db.get_conn)):
 
 # ------------------------------------------------------------------ rooms ----------
 
-def _room_view(conn, rid):
+def _room_view(conn, rid, ctx=None):
     r = db.one(conn, "SELECT * FROM coordination_rooms WHERE id=?", (rid,))
     if not r:
         raise HTTPException(404, "room not found")
@@ -465,10 +465,13 @@ def _room_view(conn, rid):
     timeline.sort(key=lambda e: e["ts"], reverse=True)
     pairs = [services.pair_view(p) for p in db.rows(conn, "SELECT * FROM overlap_pairs WHERE cluster_id=? ORDER BY score DESC",
                                                     (r["cluster_id"],))]
-    return {"id": r["id"], "cluster_id": r["cluster_id"], "institution": inst, "lead_bureau": r["lead_bureau"],
+    view = {"id": r["id"], "cluster_id": r["cluster_id"], "institution": inst, "lead_bureau": r["lead_bureau"],
             "status": r["status"], "decision": json.loads(r["decision"]) if r["decision"] else None,
             "created_at": r["created_at"], "resolved_at": r["resolved_at"], "cases": cases, "comments": comments,
-            "timeline": timeline[:40], "pairs": pairs}
+            "timeline": timeline[:40], "pairs": pairs, "can_manage_members": False}
+    if ctx is not None:
+        view["can_manage_members"] = links.can_manage_room(ctx, view)
+    return view
 
 
 @app.post("/api/rooms")
@@ -481,7 +484,7 @@ def create_room(body: dict = Body(...), conn=Depends(db.get_conn), ctx=Depends(g
         raise HTTPException(400, "cluster_id required")
     existing = db.one(conn, "SELECT id FROM coordination_rooms WHERE cluster_id=?", (cid,))
     if existing:
-        return _room_view(conn, existing["id"])
+        return _room_view(conn, existing["id"], ctx)
     cases = db.rows(conn, "SELECT case_id,institution_id,bureau_code,received_on FROM cases WHERE cluster_id=? "
                           "ORDER BY received_on", (cid,))
     if not cases:
@@ -501,12 +504,44 @@ def create_room(body: dict = Body(...), conn=Depends(db.get_conn), ctx=Depends(g
     conn.commit()
     events.publish("room.created", {"room_id": rid})
     events.publish("dashboard.invalidate", {})
-    return _room_view(conn, rid)
+    return _room_view(conn, rid, ctx)
 
 
 @app.get("/api/rooms/{room_id}")
-def get_room(room_id: str, conn=Depends(db.get_conn)):
-    return _room_view(conn, room_id)
+def get_room(room_id: str, conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    return _room_view(conn, room_id, ctx)
+
+
+@app.post("/api/links")
+def create_link(body: dict = Body(...), conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    """Manually link two cases of the same institution (outside what the engine detected)."""
+    out = links.link_cases(conn, ctx, body.get("case_a"), body.get("case_b"), body.get("rationale"))
+    conn.commit()
+    if out["created"]:
+        events.publish("dashboard.invalidate", {})
+        if out["room_id"]:
+            events.publish("room.updated", {"room_id": out["room_id"]})
+    return out
+
+
+@app.post("/api/rooms/{room_id}/cases")
+def add_room_case(room_id: str, body: dict = Body(...), conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    if not body.get("case_id"):
+        raise HTTPException(400, "case_id required")
+    links.add_to_room(conn, ctx, room_id, body["case_id"], body.get("rationale"))
+    conn.commit()
+    events.publish("room.updated", {"room_id": room_id})
+    events.publish("dashboard.invalidate", {})
+    return _room_view(conn, room_id, ctx)
+
+
+@app.delete("/api/rooms/{room_id}/cases/{case_id:path}")
+def remove_room_case(room_id: str, case_id: str, reason: str = "", conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    links.remove_from_room(conn, ctx, room_id, case_id, reason)
+    conn.commit()
+    events.publish("room.updated", {"room_id": room_id})
+    events.publish("dashboard.invalidate", {})
+    return _room_view(conn, room_id, ctx)
 
 
 @app.post("/api/rooms/{room_id}/comments")
@@ -519,7 +554,7 @@ def add_comment(room_id: str, body: dict = Body(...), conn=Depends(db.get_conn),
                  (room_id, ctx.persona[1], ctx.persona[2], text, db.iso(db.now(conn))))
     conn.commit()
     events.publish("room.updated", {"room_id": room_id})
-    return _room_view(conn, room_id)
+    return _room_view(conn, room_id, ctx)
 
 
 @app.post("/api/rooms/{room_id}/lead")
@@ -535,7 +570,7 @@ def set_lead(room_id: str, body: dict = Body(...), conn=Depends(db.get_conn), ct
                  (room_id, "System", "SYS", f"Lead Bureau set to {lead}.", db.iso(db.now(conn))))
     conn.commit()
     events.publish("room.updated", {"room_id": room_id})
-    return _room_view(conn, room_id)
+    return _room_view(conn, room_id, ctx)
 
 
 @app.post("/api/rooms/{room_id}/decision")
@@ -567,7 +602,7 @@ def decide(room_id: str, body: dict = Body(...), conn=Depends(db.get_conn), ctx=
     conn.commit()
     events.publish("room.updated", {"room_id": room_id})
     events.publish("dashboard.invalidate", {})
-    return _room_view(conn, room_id)
+    return _room_view(conn, room_id, ctx)
 
 
 # ------------------------------------------------------------------ alerts ---------
