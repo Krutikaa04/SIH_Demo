@@ -25,4 +25,3 @@ def meta_officers(conn=Depends(db.get_conn)):
 @router.get("/api/clock")
 def get_clock(conn=Depends(db.get_conn)):
     return {"offset_days": int(db.get_setting(conn, "clock_offset_days", "0")), "now": db.iso(db.now(conn))}
-
