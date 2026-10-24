@@ -40,8 +40,8 @@ Legend: ✅ built and tested · 🟡 built, simplified on purpose (LITE) · 🎭
 | R4 | Real-time dashboard | 🟡 SSE push + refresh, single process | `pages/Dashboard.tsx`, `events.py`, `GET /api/events` |
 | R5 | Workflow & action history (+ documents) | ✅ / 🟡 docs on local disk, no preview | `POST /api/cases/{id}/actions`, `extras.py` (documents) |
 | R6 | Search & filters (all 8 filters) | ✅ | `Cases.tsx`, `services.case_where()` |
-| R7 | Alerts & notifications | 🟡 in-app only; 🎭 email/SMS not sent | `sla.py`, `pages/Alerts.tsx`, bell in `Layout.tsx` |
-| R8 | Reports & analytics (8 reports + filters) | ✅ Bureau, region, institution, status, ageing, disposal, overlaps, periodic with additive filters | `reports.py`, `pages/Reports.tsx` |
+| R7 | Alerts & notifications + simulated outbox | ✅ in-app alerts, "Send reminder" dispatch, auto-queue escalation/reminder alerts, Outbox page with pluggable Notifier | `sla.py`, `notify.py`, `pages/Alerts.tsx`, `pages/Outbox.tsx` |
+| R8 | Reports & analytics (7 reports) | 🟡 fixed set, no custom builder | `reports.py`, `pages/Reports.tsx` |
 
 ### Standout features (A–K) and extras
 | # | Feature | Status | Notes |
@@ -399,6 +399,7 @@ Suggested split mirrors the original four tracks. Effort is a rough developer-ho
 | Add a workflow **action** | extend `ACTION_LABEL` + branch in `case_action` (`main.py`), permission in `roles.allowed_actions`, button in `CaseDetail.tsx` |
 | Add a **role** | add to `roles.PERSONAS` / `ROLE_LABELS`, update `allowed_actions`; the dropdown reads `/api/meta` |
 | Add an **institution field** | `db.SCHEMA` + `seed.build_institutions` + `Institution.tsx`, re-seed |
+| Swap in real **SMTP/SMS Notifier** | implement the `Notifier` protocol in `backend/app/notify.py` (`send(self, conn, message)`) and return it in `get_notifier()`; callers invoke `notify.dispatch_notification(...)` without modification |
 | Reset everything | Demo ▾ → Reset demo data, or `python run.py --reseed` |
 
 ---

@@ -35,8 +35,8 @@ Run the backend in another terminal with `python run.py --no-browser`.
 - Coordination Room: link cases, pick lead Bureau, comment, record decision
 - Dashboard with KPIs, charts, ageing, trend, risk-ranked institutions and live activity
 - **Simulate New Complaint** button: files a scripted complaint through the real pipeline and fires a live alert
-- **SLA engine**: countdown timers, 75% warnings, auto-escalation at 100% (Deputy Director) and 150% (Director),
-  ping-pong transfer alerts and daily pending-reminder digests. Demo > "Time machine: +7 days" triggers it live
+- **SLA engine & Simulated Outbox**: countdown timers, 75% warnings, auto-escalation at 100% (Deputy Director) and 150% (Director),
+  ping-pong transfer alerts, daily pending-reminder digests, and simulated email/SMS reminder dispatch with dedicated Outbox archive. Demo > "Time machine: +7 days" triggers it live
 - **Case workflow**: remark, assign, transfer, escalate, dispose; every action is hash-chained, with
   "Verify integrity" and a demo "Tamper with a record" button
 - **Institution risk score** (volume + severity + repeat offences + overdue), colour-coded, with breakdown

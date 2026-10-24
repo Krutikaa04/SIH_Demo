@@ -68,10 +68,16 @@ CREATE TABLE documents (
   size INTEGER, uploaded_by TEXT, uploaded_at TEXT
 );
 CREATE INDEX ix_docs_case ON documents(case_id);
+CREATE TABLE outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, alert_id INTEGER, channel TEXT,
+  recipient_role TEXT, recipient_bureau TEXT, subject TEXT, body TEXT,
+  status TEXT DEFAULT 'SIMULATED', created_by TEXT, created_at TEXT
+);
+CREATE INDEX ix_outbox_alert ON outbox(alert_id);
 """
 
 TABLES = ["institutions", "officers", "cases", "action_history", "overlap_pairs",
-          "coordination_rooms", "room_cases", "room_comments", "alerts", "settings", "documents"]
+          "coordination_rooms", "room_cases", "room_comments", "alerts", "settings", "documents", "outbox"]
 
 
 def configure(path=None):
@@ -93,6 +99,17 @@ def connect():
         conn.execute("ALTER TABLE overlap_pairs ADD COLUMN review_rationale TEXT")
         conn.execute("ALTER TABLE overlap_pairs ADD COLUMN review_by TEXT")
         conn.execute("ALTER TABLE overlap_pairs ADD COLUMN review_at TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS outbox (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, alert_id INTEGER, channel TEXT,
+          recipient_role TEXT, recipient_bureau TEXT, subject TEXT, body TEXT,
+          status TEXT DEFAULT 'SIMULATED', created_by TEXT, created_at TEXT
+        )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_outbox_alert ON outbox(alert_id)")
     except sqlite3.OperationalError:
         pass
     return conn
