@@ -85,13 +85,16 @@ def test_notify_endpoint_permissions_and_validation(client, as_role, conn):
 
 
 def test_preview_endpoint(client, as_role, conn):
+    case = db.one(conn, "SELECT case_id, institution_id, bureau_code FROM cases WHERE bureau_code='RB' LIMIT 1")
     cur = conn.execute(
         "INSERT INTO alerts(type, severity, case_id, institution_id, message, created_at) "
-        "VALUES('SLA_NEAR', 'MEDIUM', NULL, NULL, 'Notice regarding timelines', '2026-10-24T10:00:00')"
+        "VALUES('SLA_NEAR', 'MEDIUM', ?, ?, 'Notice regarding timelines', '2026-10-24T10:00:00')",
+        (case["case_id"], case["institution_id"])
     )
     aid = cur.lastrowid
     conn.commit()
 
+    # Senior role can preview
     res = client.get(f"/api/alerts/{aid}/notify/preview?channel=email", headers=as_role("SENIOR"))
     assert res.status_code == 200
     preview = res.json()
@@ -100,9 +103,21 @@ def test_preview_endpoint(client, as_role, conn):
     assert "subject" in preview
     assert "body" in preview
 
+    # RB bureau can preview its own case alert
+    res_rb = client.get(f"/api/alerts/{aid}/notify/preview?channel=sms", headers=as_role("RB"))
+    assert res_rb.status_code == 200
+
+    # Non-involved bureau (PGRC) cannot preview an RB alert (403)
+    res_pgrc = client.get(f"/api/alerts/{aid}/notify/preview", headers=as_role("PGRC"))
+    assert res_pgrc.status_code == 403
+
     # Regional role cannot preview (403)
     res_reg = client.get(f"/api/alerts/{aid}/notify/preview", headers=as_role("REGIONAL", "Northern"))
     assert res_reg.status_code == 403
+
+    # Invalid channel returns 400
+    res_bad = client.get(f"/api/alerts/{aid}/notify/preview?channel=fax", headers=as_role("SENIOR"))
+    assert res_bad.status_code == 400
 
 
 def test_get_outbox_endpoint(client, as_role, conn):

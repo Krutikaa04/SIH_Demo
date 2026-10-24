@@ -14,7 +14,7 @@ import {
   CheckCircle2,
   ArrowRight,
 } from 'lucide-react'
-import { post, useApi, api } from '../api'
+import { post, useApi, api, useRole } from '../api'
 import { Card, Drawer, ErrorBox, Loading, ago, cx } from '../ui'
 
 const TABS = [
@@ -36,6 +36,8 @@ const ICON: any = {
 }
 
 export default function Alerts() {
+  const me = useRole()
+  const isRegional = me.role === 'REGIONAL'
   const [type, setType] = useState('')
   const [selectedAlert, setSelectedAlert] = useState<any>(null)
   const [channel, setChannel] = useState<'email' | 'sms'>('email')
@@ -169,18 +171,20 @@ export default function Alerts() {
                     <span className="shrink-0 text-xs text-slate-400 mr-2">{ago(a.created_at)}</span>
                   </Link>
 
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault()
-                      openReminderDrawer(a)
-                    }}
-                    className="ml-2 shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 hover:text-navy hover:border-slate-300 transition"
-                    title="Send simulated reminder"
-                  >
-                    <Send size={12} className="text-navy" />
-                    Send reminder
-                  </button>
+                  {!isRegional && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        openReminderDrawer(a)
+                      }}
+                      className="ml-2 shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 hover:text-navy hover:border-slate-300 transition"
+                      title="Send simulated reminder"
+                    >
+                      <Send size={12} className="text-navy" />
+                      Send reminder
+                    </button>
+                  )}
                 </li>
               )
             })}

@@ -624,6 +624,11 @@ def preview_alert_reminder(alert_id: int, channel: str = "email",
     alert = db.one(conn, "SELECT * FROM alerts WHERE id=?", (alert_id,))
     if not alert:
         raise HTTPException(404, "Alert not found")
+    if ctx.role in BUREAUS:
+        if alert["case_id"]:
+            c = db.one(conn, "SELECT bureau_code FROM cases WHERE case_id=?", (alert["case_id"],))
+            if c and c["bureau_code"] != ctx.role:
+                raise HTTPException(403, f"Bureau {ctx.role} cannot preview reminders for {c['bureau_code']} cases")
     if channel.lower() not in ("email", "sms"):
         raise HTTPException(400, "Invalid channel: must be 'email' or 'sms'")
     preview = notify.render_notification(conn, alert, channel=channel)
