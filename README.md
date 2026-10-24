@@ -84,3 +84,16 @@ return to the `AICTE_DB` environment setting, resolved when a connection is open
 API routes live in `backend/app/routers/`, grouped by domain. `backend/app/main.py`
 only wires the routers, background SLA task, middleware and static UI. Register
 specific case subroutes before the greedy case detail route, and the SPA fallback last.
+
+## Frontend checks
+
+From `frontend`, run `npm ci`, then `npm run typecheck`, `npm run lint`, `npm test`
+and `npm run build`. Vitest uses jsdom and mocked fetch responses, without a backend
+or network. Regression tests cover Coordination Room roles, NL-search chips, shared
+badges, Card subtitles and API errors. ESLint enforces Hooks rules and reports the
+existing dependency-array warnings with a bounded baseline; TypeScript strict mode
+stays off. A frontend build does not replace the type-check step.
+
+The frontend uses TypeScript 6, within typescript-eslint's supported peer range;
+the previous TypeScript 7 dependency cannot install with that parser. ESLint allows
+the six existing exhaustive-deps warnings and fails if the count increases.

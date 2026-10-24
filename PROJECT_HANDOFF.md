@@ -425,3 +425,14 @@ those modules. `extras.router` is registered first for document routes; case his
 and actions precede case detail; the SPA fallback is last. Public URLs, operation
 IDs, dependency injection and response shapes are preserved. The route inventory
 regression test guards against accidental method/path changes.
+
+## Frontend quality checks
+
+Use `npm run typecheck`, `npm run lint`, `npm test`, and `npm run build` in
+`frontend/`. Component tests use Vitest, jsdom, Testing Library and mocked API
+responses. `src/test/utils.tsx` provides router/toast wrappers and a fetch helper
+that rejects unexpected routes. The Room-role regression covers Senior, PGRC,
+Regional and a non-participating Bureau. Card supports a rendered subtitle.
+TypeScript remains non-strict; existing Hooks dependency warnings are a tracked
+lint baseline rather than ignored errors. Build artifacts remain under the current
+committed-dist policy pending the team decision in issue #7.
