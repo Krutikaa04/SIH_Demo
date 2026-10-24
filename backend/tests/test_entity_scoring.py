@@ -181,3 +181,20 @@ def test_labelled_entity_ablation(conn):
     assert results["entities_70"] == {"tp": 19, "fp": 0, "fn": 0, "tn": 3,
                                       "precision": 1.0, "recall": 1.0}
     assert results["baseline_50"] == results["entities_50"]
+
+
+def test_live_preview_includes_shared_evidence_without_writing(client, conn, as_role):
+    existing = planted_case(conn, "Kochi", 0, "RB", 19)
+    draft = planted_case(conn, "Kochi", 0, "LC", 7)
+    response = client.post("/api/complaints/preview", headers=as_role("LC"), json={
+        "institution_name": draft["submitted_institution_name"], "bureau": "LC",
+        "category": draft["category"], "description": draft["description"],
+        "received_on": draft["received_on"], "severity": 3, "source": "Letter"})
+    assert response.status_code == 200
+    preview = response.json()
+    assert preview["ready"]
+    match = next(row for row in preview["potential_overlaps"] if row["case_id"] == existing["case_id"])
+    assert len(match["breakdown"]) == 6
+    assert signal(match)["points"] == 4
+    assert "₹45,000" in signal(match)["detail"]
+    assert len(intel.load_cases(conn)) == 300
