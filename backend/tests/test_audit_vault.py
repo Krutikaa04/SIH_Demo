@@ -21,7 +21,7 @@ def test_audit_ledger_default_structure_and_pagination(client, as_role):
 
     # Verify item fields
     item = data["items"][0]
-    for key in ("case_id", "seq", "ts", "action_type", "actor_bureau", "prev_hash", "hash", "institution_name"):
+    for key in ("case_id", "seq", "ts", "actor", "action_type", "actor_bureau", "prev_hash", "hash", "institution_name"):
         assert key in item
 
     # Verify descending timestamp ordering
@@ -40,6 +40,10 @@ def test_audit_ledger_filters(client, as_role, conn):
     case_data = res_case.json()
     assert case_data["total"] >= 1
     assert all(it["case_id"] == cid for it in case_data["items"])
+    assert "tip_hash_by_case" in case_data
+    assert case_data["tip_hash_by_case"] is not None
+    assert cid in case_data["tip_hash_by_case"]
+    assert len(case_data["tip_hash_by_case"][cid]) == 64
 
     # 2. Filter by action_type
     res_action = client.get("/api/audit/ledger?action_type=AUTO_ESCALATE", headers=as_role("SENIOR"))

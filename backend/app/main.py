@@ -649,8 +649,9 @@ def audit_ledger(case_id: str = "", action_type: str = "", actor_bureau: str = "
     offset = (page - 1) * effective_page_size
     select_sql = f"""
     SELECT
-      a.id, a.case_id, a.seq, a.ts, a.actor_id, a.actor_name, a.actor_bureau, a.action_type,
-      a.from_bureau, a.to_bureau, a.remarks, a.prev_hash, a.hash,
+      a.id, a.case_id, a.seq, a.ts, a.actor_id, a.actor_name, a.actor_bureau,
+      COALESCE(a.actor_name, a.actor_id) as actor,
+      a.action_type, a.from_bureau, a.to_bureau, a.remarks, a.prev_hash, a.hash,
       c.institution_id,
       COALESCE(i.name, c.submitted_institution_name, 'Unknown Institution') as institution_name,
       COALESCE(i.region, 'Unknown') as region,
@@ -677,12 +678,19 @@ def audit_ledger(case_id: str = "", action_type: str = "", actor_bureau: str = "
     """
     action_counts = dict(conn.execute(action_counts_sql, role_params).fetchall())
 
+    tip_hash = None
+    if case_id:
+        latest = conn.execute("SELECT hash FROM action_history WHERE case_id=? ORDER BY seq DESC LIMIT 1",
+                              (case_id.strip(),)).fetchone()
+        tip_hash = latest[0] if latest else None
+
     return {
         "items": items,
         "total": total,
         "page": page,
         "page_size": effective_page_size,
         "action_counts": action_counts,
+        "tip_hash_by_case": {case_id.strip(): tip_hash} if case_id and tip_hash else None,
     }
 
 

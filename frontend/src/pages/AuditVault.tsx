@@ -41,6 +41,8 @@ const ACTION_TYPES = [
   'ESCALATE',
   'AUTO_ESCALATE',
   'DISPOSE',
+  'COORDINATION',
+  'OVERLAP_CONFIRMED',
 ]
 
 const BUREAUS = ['', 'RB', 'PGRC', 'AB', 'LC', 'VIG', 'SYS']
@@ -200,11 +202,21 @@ export default function AuditVault() {
       )}
 
       {/* Educational Notice Banner */}
-      <div className="flex items-center gap-2.5 rounded-lg border border-slate-200 bg-slate-50/70 px-4 py-2.5 text-xs text-slate-600">
-        <Info size={15} className="text-slate-500 shrink-0" />
-        <span className="leading-normal">
-          <strong className="text-slate-800">Tamper-evident guarantee:</strong> This vault is tamper-evident (any modification to history breaks subsequent hashes), verifiable completely offline.
-        </span>
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/70 px-4 py-2.5 text-xs text-slate-600">
+        <div className="flex items-center gap-2.5">
+          <Info size={15} className="text-slate-500 shrink-0" />
+          <span className="leading-normal">
+            <strong className="text-slate-800">Tamper-evident guarantee:</strong> This audit vault is <strong>tamper-evident</strong>, not tamper-proof — any unauthorized modification breaks subsequent SHA-256 hashes and is immediately flagged upon integrity verification.
+          </span>
+        </div>
+        <a
+          href="https://github.com/Krutikaa04/SIH_Demo/blob/master/PROJECT_HANDOFF.md#standout-features-a-k-and-extras"
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 font-semibold text-navy hover:underline shrink-0"
+        >
+          Learn more in docs <ExternalLink size={12} />
+        </a>
       </div>
 
       {/* KPI Counters */}
@@ -238,6 +250,49 @@ export default function AuditVault() {
           </span>
           <span className="text-xs text-slate-500">Case closures recorded</span>
         </div>
+      </div>
+
+      {/* Quick Filter Action Pills */}
+      <div className="flex flex-wrap items-center gap-2 pt-1">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mr-1">
+          Quick Filters:
+        </span>
+        {[
+          { label: 'All Events', value: '' },
+          { label: 'Auto-Escalated', value: 'AUTO_ESCALATE' },
+          { label: 'Transfers', value: 'TRANSFER' },
+          { label: 'Escalations', value: 'ESCALATE' },
+          { label: 'Remarks', value: 'REMARK' },
+          { label: 'Disposals', value: 'DISPOSE' },
+          { label: 'Coordination', value: 'COORDINATION' },
+          { label: 'Overlap Confirmed', value: 'OVERLAP_CONFIRMED' },
+        ].map((pill) => {
+          const isSelected = (!pill.value && !actionTypeFilter) || actionTypeFilter === pill.value
+          const count = pill.value ? actionCounts[pill.value] || 0 : total
+          return (
+            <button
+              key={pill.value || 'all'}
+              type="button"
+              onClick={() => setParam('action_type', pill.value)}
+              className={cx(
+                'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition',
+                isSelected
+                  ? 'bg-navy text-white shadow-xs'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 hover:text-slate-900'
+              )}
+            >
+              <span>{pill.label}</span>
+              <span
+                className={cx(
+                  'rounded-full px-1.5 py-0.2 text-[10px] font-bold',
+                  isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+                )}
+              >
+                {count.toLocaleString()}
+              </span>
+            </button>
+          )
+        })}
       </div>
 
       {/* Filter Bar */}
