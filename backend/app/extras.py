@@ -2,17 +2,18 @@
 import base64
 import hashlib
 import re
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import FileResponse, Response
 
-from . import db, events, nlsearch, reports, roles, services
+from . import db, events, nlsearch, reports, roles, services, security, upload_security
 from .roles import get_ctx
 
 router = APIRouter()
 UPLOADS = db.ROOT / "data" / "uploads"
-MAX_BYTES = 2 * 1024 * 1024
+MAX_BYTES = upload_security.MAX_BYTES
 
 
 @router.post("/api/complaints/preview")
@@ -97,21 +98,35 @@ def upload_document(case_id: str, body: dict = Body(...), conn=Depends(db.get_co
         raise HTTPException(404, "case not found")
     if "remark" not in roles.allowed_actions(ctx, c["bureau_code"], c["inst_region"], c["status"]):
         roles.forbid("Your role cannot add documents to this case")
-    name = re.sub(r"[^A-Za-z0-9._ -]", "_", (body.get("filename") or "document").strip())[:80] or "document"
+    supplied_name = body.get("filename") or "document"
+    if not isinstance(supplied_name, str):
+        raise HTTPException(400, "filename must be text")
+    name = re.sub(r"[^A-Za-z0-9._ -]", "_", supplied_name.strip())[:80] or "document"
+    encoded = body.get("content_base64") or ""
+    if not isinstance(encoded, str):
+        raise HTTPException(400, "file content must be base64 text")
     try:
-        raw = base64.b64decode(body.get("content_base64") or "", validate=True)
+        raw = base64.b64decode(encoded, validate=True)
     except Exception:
         raise HTTPException(400, "invalid file content")
-    if not raw or len(raw) > MAX_BYTES:
-        raise HTTPException(400, "file must be between 1 byte and 2 MB")
+    if len(raw) > MAX_BYTES:
+        raise HTTPException(413, f"File exceeds {MAX_BYTES} bytes")
+    if not raw:
+        raise HTTPException(400, "file must not be empty")
+    if not upload_security.allowed_document(name, raw):
+        raise HTTPException(415, "Unsupported document type or invalid file signature")
     sha = hashlib.sha256(raw).hexdigest()
     folder = UPLOADS / case_id.replace("/", "_")
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"{sha[:8]}_{name}"
+    path = folder / f"{uuid.uuid4().hex}{Path(name).suffix.lower()}"
     path.write_bytes(raw)
     stamp = db.iso(db.now(conn))
     P = ctx.persona
-    note = (body.get("remarks") or "").strip()
+    try:
+        note = security.validate_remarks(body.get("remarks") or "")
+    except ValueError as e:
+        path.unlink(missing_ok=True)
+        raise HTTPException(400, str(e))
     seq, _ = db.append_action(conn, case_id, stamp, P[0], P[1], P[2], "DOC_ADDED", None, None,
                               f"Document added: {name} (SHA-256 {sha[:16]}…)" + (f" — {note}" if note else ""))
     conn.execute("INSERT INTO documents(case_id,seq,filename,path,sha256,size,uploaded_by,uploaded_at) VALUES(?,?,?,?,?,?,?,?)",
@@ -129,4 +144,5 @@ def download_document(doc_id: int, conn=Depends(db.get_conn)):
     d = db.one(conn, "SELECT * FROM documents WHERE id=?", (doc_id,))
     if not d or not Path(d["path"]).exists():
         raise HTTPException(404, "document not found")
-    return FileResponse(d["path"], filename=d["filename"])
+    return FileResponse(d["path"], filename=d["filename"], content_disposition_type="attachment",
+                        headers={"X-Content-Type-Options": "nosniff", "Content-Type": "application/octet-stream"})

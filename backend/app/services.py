@@ -4,6 +4,7 @@ import random
 from datetime import datetime, timedelta
 
 from . import db, events, intel, seed, sla_rules
+from .security import setting_int
 from .constants import BUREAUS, CATEGORY_GROUP, HEADLINE_HIGH, OPEN_STATUSES, SLA_DAYS
 
 PERSONA = ("OFF-SM-01", "Competent Authority", "SENIOR")  # P0 has no login; one acting persona
@@ -265,7 +266,13 @@ class Unresolved(Exception):
 def clean_complaint(conn, data, ctx, lenient=False):
     """Validate and normalise a complaint payload. Raises ValueError with a human-readable message."""
     today = db.now(conn).date()
+    if not isinstance(data.get("institution_name") or "", str):
+        raise ValueError("Institution name must be text")
+    if not isinstance(data.get("description") or "", str):
+        raise ValueError("Description must be text")
     name = (data.get("institution_name") or "").strip()
+    if len(name) > setting_int("AICTE_MAX_INSTITUTION_NAME", 200):
+        raise ValueError("Institution name must not exceed 200 characters")
     inst_id = (data.get("institution_id") or "").strip() or None
     if not name and not inst_id:
         raise ValueError("Institution name is required")
@@ -279,6 +286,8 @@ def clean_complaint(conn, data, ctx, lenient=False):
         else:
             raise ValueError("Choose a valid complaint category")
     desc = " ".join((data.get("description") or "").split())
+    if len(desc) > setting_int("AICTE_MAX_DESCRIPTION", 5000):
+        raise ValueError("Description must not exceed 5000 characters")
     if len(desc) < 10 and not lenient:
         raise ValueError("Description must be at least 10 characters")
     try:
@@ -446,6 +455,11 @@ def import_complaints(conn, csv_text, ctx, dry_run=True):
     import csv
     import io as _io
     text = csv_text.lstrip("\ufeff")
+    max_row = setting_int("AICTE_MAX_CSV_ROW_CHARS", 10000)
+    # Validate physical lines first to avoid parsing arbitrarily large fields.
+    for line in text.splitlines():
+        if len(line) > max_row:
+            raise ValueError(f"CSV row must not exceed {max_row} characters")
     rows = list(csv.DictReader(_io.StringIO(text)))
     if not rows:
         raise ValueError("The CSV has no data rows")
@@ -454,6 +468,8 @@ def import_complaints(conn, csv_text, ctx, dry_run=True):
     reg = intel.Registry(conn)
     results, best = [], None
     for n, raw in enumerate(rows, start=2):
+        if sum(len(str(v or "")) for v in raw.values()) > max_row:
+            raise ValueError(f"CSV row {n} exceeds {max_row} characters")
         norm = {(k or "").strip().lower().replace(" ", "_"): (v or "") for k, v in raw.items()}
         data = {}
         for field, names in CSV_ALIASES.items():

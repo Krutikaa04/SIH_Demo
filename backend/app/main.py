@@ -3,7 +3,10 @@ import asyncio
 import json
 import sqlite3
 import uuid
+import mimetypes
 from contextlib import asynccontextmanager
+
+mimetypes.add_type("text/javascript", ".js")
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -12,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import db, events, extras, intel, reports, risk, roles, seed, services, sla, galaxy, briefings, sla_rules
+from . import db, events, extras, intel, reports, risk, roles, seed, services, sla, galaxy, briefings, sla_rules, security
 from .constants import (BUREAUS, BUREAU_ORDER, CATEGORIES, OPEN_STATUSES, REGION_STATES, SLA_DAYS, STATUSES)
 from .roles import get_ctx
 
@@ -45,6 +48,7 @@ async def lifespan(app):
 
 
 app = FastAPI(title="AICTE Integrated Complaint Monitoring", lifespan=lifespan)
+app.add_middleware(security.SecurityMiddleware)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
                    allow_methods=["*"], allow_headers=["*"])
 app.include_router(extras.router)  # registered first so /api/cases/{id}/documents wins over the catch-all id route
@@ -294,7 +298,10 @@ def case_action(case_id: str, body: dict = Body(...), conn=Depends(db.get_conn),
         raise HTTPException(400, "unknown action type")
     if kind not in roles.allowed_actions(ctx, c["bureau_code"], c["inst_region"], c["status"]):
         roles.forbid(f"{roles.ROLE_LABELS[ctx.role]} cannot {kind} this case")
-    remarks = (body.get("remarks") or "").strip()
+    try:
+        remarks = security.validate_remarks(body.get("remarks") or "")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     if kind in ("remark", "dispose") and not remarks:
         raise HTTPException(400, "remarks are required")
     # Coordination guard: overlapping / merged cases cannot be acted on blindly
@@ -655,7 +662,10 @@ def overlap_pair(pair_id: str, conn=Depends(db.get_conn)):
 @app.post("/api/overlaps/{pair_id}/review")
 def review_overlap_pair(pair_id: str, body: dict = Body(...), conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
     decision = (body.get("decision") or "").upper()
-    rationale = (body.get("rationale") or "").strip()
+    try:
+        rationale = security.validate_remarks(body.get("rationale") or "", "Review rationale")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     if decision not in ("CONFIRMED", "REJECTED", "DEFERRED"):
         raise HTTPException(400, "Decision must be CONFIRMED, REJECTED, or DEFERRED")
     if not rationale:
@@ -786,7 +796,10 @@ def get_room(room_id: str, conn=Depends(db.get_conn)):
 
 @app.post("/api/rooms/{room_id}/comments")
 def add_comment(room_id: str, body: dict = Body(...), conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
-    text = (body.get("body") or "").strip()
+    try:
+        text = security.validate_remarks(body.get("body") or "", "Comment")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     if not text:
         raise HTTPException(400, "empty comment")
     _room_view(conn, room_id)
