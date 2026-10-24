@@ -7,25 +7,26 @@ Browser full screen, 100% zoom, role = **Senior Management**.
 1. `python run.py`, then in another terminal `python scripts/smoke_test.py`. It must print **ALL CHECKS PASSED**. It also leaves the data reset.
 2. Refresh the browser. Check: role says *Senior Management*, no "Demo date +Nd" chip, bell shows unread alerts.
 3. Start your screen recorder as insurance (Windows: **Win+Alt+R**).
-4. Know the reset: **Demo ▾ → Reset demo data** (restores everything, also the clock and the audit trail).
+4. Switch **Demo mode** on: click your role chip (top right, *Viewing as…*) and turn on the **Demo mode** switch. A **Demo tools** button appears bottom-right (Ctrl+Shift+D toggles it).
+5. Know the reset: **Demo tools → Reset all demo data** (restores everything, also the clock and the audit trail).
 
 ## The 3-minute run
 | Time | Do this | Say this | Proves |
 |---|---|---|---|
-| 0:00–0:20 | **Dashboard.** Point at the red banner, the KPI tiles (the red "beyond timeline" tile), the *Daily briefing*, then hover the **heatmap** (Western is darkest). | "One Pune college, three Bureaus, nobody knows. Today each Bureau sees only its own file. This is the single window: every complaint, every Bureau, one place." | Real-time dashboard, region view, briefing |
+| 0:00–0:20 | **Home** (as Senior Management). Point at the red banner, the headline figures (the red *Past due date* tile), *What stands out today*, then scroll to the **Regions** map (Western is darkest). | "One Pune college, three Bureaus, nobody knows. Today each Bureau sees only its own file. This is the single window: every complaint, every Bureau, one place." | Real-time dashboard, region view, briefing |
 | 0:20–0:40 | **Cases** → click the example chip *pending RB cases in Western region older than 30 days* (or type it). Point at **"I understood:"**. | "Plain-English search. It's a rule-based parser, so it tells you exactly what it understood, runs offline, no AI service." | Natural-language search, filters |
 | 0:40–0:55 | **Institutions** → search *Sahyadri* → open it. Show the **risk score**, its breakdown, and the history across RB, PGRC and AB. | "One master profile by AICTE ID. Risk score from volume, severity, repeat offences and overdue cases. This one is a repeat offender." | Institution profile, risk score |
-| 0:55–1:25 | Click **Why flagged** on the red banner. Click through the three pairs. | "RB's case has no AICTE ID and spells the name 'Govt. College of Engg'. PGRC wrote it in full. The descriptions differ. We still match them, and show *why*: identity, name, text, category, time, with points." | Explainable overlap engine |
-| 1:25–1:55 | **Link cases in Coordination Room** → keep **RB** as lead → type a comment → choose *Merge under lead Bureau* → **Record decision**. | "Instead of two show-cause notices, one lead Bureau, one decision, written into every case's history." Show the dashboard's *effort saved* later. | Coordination Room |
-| 1:55–2:20 | Press **Simulate New Complaint**. The toast pops. Then switch the role dropdown to **Public Grievance Cell**. | "A new complaint arrives with a different spelling and no ID. Detected in under a second. Now I'm PGRC: my desk, and I can't act on RB's case." | Live alert, role switcher |
-| 2:20–2:40 | **Demo ▾ → Time machine: +7 days**. Toast: cases auto-escalated. Open **Cases → status Escalated**, open one: countdown and "System (SLA engine)" row. | "SLA timers on every case. When a timeline is crossed, it escalates by itself: Deputy Director, then Director." | SLA timers, auto-escalation |
-| 2:40–2:55 | **Demo ▾ → Verify audit trail** (green). **Tamper with a record.** **Verify** again (red). | "Every action is hash-chained. Change one record in the database and we see exactly which one." | Tamper-evident audit trail |
+| 0:55–1:25 | Click **Review overlaps** on the red banner, then **Why flagged?** on a cluster. Click through the three pairs. | "RB's case has no AICTE ID and spells the name 'Govt. College of Engg'. PGRC wrote it in full. The descriptions differ. We still match them, and show *why*: identity, name, text, category, time, with points." | Explainable overlap engine |
+| 1:25–1:55 | **Start coordinating** → step 2 keep **RB** as lead → write a message → step 3 choose *One Bureau leads* → **Record the decision**. | "Instead of two show-cause notices, one lead Bureau, one decision, written into every case's history." Show the dashboard's *effort saved* later. | Coordination Room |
+| 1:55–2:20 | Open **Demo tools → File a new complaint**. The toast pops. Then click your role chip (top right) and choose **Public Grievance Cell**. | "A new complaint arrives with a different spelling and no ID. Detected in under a second. Now I'm PGRC: my desk, and I can't act on RB's case." | Live alert, role switcher |
+| 2:20–2:40 | **Demo tools → Jump 7 days ahead**. Toast: cases auto-escalated. Open **Cases**, choose *More filters → Status → Escalated*, open one: countdown and "System (SLA engine)" row. | "SLA timers on every case. When a timeline is crossed, it escalates by itself: Deputy Director, then Director." | SLA timers, auto-escalation |
+| 2:40–2:55 | **Demo tools → Verify the audit trail** (green). **Tamper with a record.** **Verify** again (red). | "Every action is hash-chained. Change one record in the database and we see exactly which one." | Tamper-evident audit trail |
 | 2:55–3:00 | **Reports** → **Export PDF**. | "Bureau, region, institution, ageing, disposal rate, overlaps, monthly and quarterly, as CSV or PDF. Offline, explainable, zero paid APIs." | Reports and export |
 
-**After the run:** Demo ▾ → **Reset demo data** (the audit trail stays "tampered" and the clock stays advanced until you do).
+**After the run:** Demo tools → **Reset all demo data** (the audit trail stays "tampered" and the clock stays advanced until you do).
 
 ## Optional 20-second add-on (if you have time, swap with the Reports step)
-**Register complaint** → type *Sahyadri Govt Coll of Engg Poona*, choose *Public Grievance Cell*, category *Academic Quality*, paste a one-line description. Point at the **Live check** panel: it matched the misspelt name, lists what is already open at the institution, and shows **Potential Overlapping Cases** *before* you submit. Say: "New complaints get checked on the way in, not after the damage is done." Then open any case in an overlap and press **Escalate** to show **"Coordinate before acting"** (the guard). Remember to reset afterwards.
+**Add complaint** → type *Sahyadri Govt Coll of Engg Poona*, choose *Public Grievance Cell*, category *Academic Quality*, paste a one-line description. Point at the **Live check** panel: it matched the misspelt name, lists what is already open at the institution, and shows **Potential Overlapping Cases** *before* you submit. Say: "New complaints get checked on the way in, not after the damage is done." Then open any case in an overlap and press **Escalate** to show **"Coordinate before acting"** (the guard). Remember to reset afterwards.
 
 ## Being honest about what is a prototype (say this once, near the end)
 > "This is a prototype on synthetic data. In production it would connect to the Bureau systems and the AICTE master through connectors, use AICTE single sign-on instead of this role switcher, and send real email and SMS. The matching, SLA and audit logic you saw is the real logic."
@@ -47,14 +48,14 @@ Browser full screen, 100% zoom, role = **Senior Management**.
 | Problem | Fix |
 |---|---|
 | Page won't load / blank | Check the terminal running `python run.py` is alive; reopen `http://127.0.0.1:8000`; if not, run `python run.py` again (about 5 s). |
-| Numbers look wrong / earlier tamper or time machine still on | **Demo ▾ → Reset demo data**. |
-| Toast didn't appear after Simulate | Open the bell (alerts are already there) or go to **Overlaps** → *Why flagged* on any cluster; press Simulate again. |
+| Numbers look wrong / earlier tamper or time machine still on | **Demo tools → Reset all demo data**. |
+| Toast didn't appear after Simulate | Open the bell (alerts are already there) or go to **Coordination** → *Why flagged?* on any cluster; run *File a new complaint* again. |
 | Live demo impossible (laptop dead) | Play the screen recording; second laptop has the bundle (`start_demo.bat`). |
 | Browser shows an old page | Hard-refresh (Ctrl+F5). |
 
 ## Rehearsal checklist
 - [ ] Run the 3-minute script **three times**, resetting in between. Time it.
-- [ ] One person drives, one talks. Practise the role switch and the Demo menu without looking.
+- [ ] One person drives, one talks. Practise the role switch (role chip, top right) and the Demo tools without looking.
 - [ ] Run once with **Wi-Fi off** (the app needs no internet).
 - [ ] Run once on the **second laptop** from the bundle.
 - [ ] Record a clean take as backup.

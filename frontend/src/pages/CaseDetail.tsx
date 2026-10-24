@@ -1,21 +1,35 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, ArrowRightLeft, Download, Paperclip, Upload, BadgeCheck, Bot, CheckCheck, FileText, GitMerge, Hash, Lock, Link2, MessageSquarePlus, ShieldAlert, ShieldCheck, TrendingUp, Unlink, UserCheck, UserPlus, Users, Zap, Siren } from 'lucide-react'
+import { ArrowRightLeft, Bot, CheckCheck, ChevronDown, Download, FileText, GitMerge, Link2, Lock, MessageSquarePlus, Paperclip, ShieldAlert, ShieldCheck, Siren, Sparkles, TrendingUp, Unlink, Upload, UserCheck, UserPlus, Users, Zap } from 'lucide-react'
 import { api, download, post, useApi, useRole } from '../api'
-import { BureauBadge, Card, Countdown, Drawer, ErrorBox, Loading, SlaChip, StatusChip, cx, fmtDate, fmtTs } from '../ui'
+import { BureauBadge, Card, Countdown, Drawer, EmptyState, ErrorBox, Loading, SlaChip, StatusChip, cx, dueText, fmtDate, fmtTs } from '../ui'
 
 const ICONS: any = {
   DOC_ADDED: Paperclip, RECEIVED: FileText, ASSIGNED: UserCheck, REMARK: FileText, TRANSFER: ArrowRightLeft, ESCALATE: TrendingUp,
   AUTO_ESCALATE: Bot, DISPOSE: CheckCheck, LINKED: GitMerge, COORDINATION: Users, LINKED_MANUAL: Link2, UNLINKED: Unlink,
 }
 const TONE: any = {
-  TRANSFER: 'bg-sky-100 text-sky-700', ESCALATE: 'bg-orange-100 text-orange-700', AUTO_ESCALATE: 'bg-orange-100 text-orange-700',
-  DISPOSE: 'bg-emerald-100 text-emerald-700', LINKED: 'bg-red-100 text-red-700', COORDINATION: 'bg-red-100 text-red-700',
-  LINKED_MANUAL: 'bg-violet-100 text-violet-700', UNLINKED: 'bg-slate-200 text-slate-700',
+  TRANSFER: 'bg-sky-50 text-sky-700 ring-sky-200', ESCALATE: 'bg-orange-50 text-orange-700 ring-orange-200', AUTO_ESCALATE: 'bg-orange-50 text-orange-700 ring-orange-200',
+  DISPOSE: 'bg-emerald-50 text-emerald-700 ring-emerald-200', LINKED: 'bg-indigo-50 text-indigo-700 ring-indigo-200', COORDINATION: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
+  LINKED_MANUAL: 'bg-indigo-50 text-indigo-700 ring-indigo-200', UNLINKED: 'bg-slate-100 text-slate-600 ring-slate-200',
+}
+const LABEL: any = {
+  RECEIVED: 'Complaint received', ASSIGNED: 'Assigned to an officer', REMARK: 'Note added', TRANSFER: 'Sent to another Bureau', ESCALATE: 'Escalated',
+  AUTO_ESCALATE: 'Escalated automatically', DISPOSE: 'Case closed', LINKED: 'Linked with related cases', COORDINATION: 'Coordination decision',
+  LINKED_MANUAL: 'Linked by an officer', UNLINKED: 'Taken out of a room', DOC_ADDED: 'Document added', INSTITUTION_MATCHED: 'Institution matched',
+  OVERLAP_CONFIRMED: 'Overlap confirmed', OVERLAP_REJECTED: 'Overlap ruled out', OVERLAP_DEFERRED: 'Overlap review postponed',
 }
 
-function Field({ label, children }: any) {
-  return <div><dt className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{label}</dt><dd className="mt-0.5 text-sm text-slate-800">{children || '—'}</dd></div>
+const ACTIONS: { k: string; label: string; sub: string; icon: any; title: string; confirm: string }[] = [
+  { k: 'remark', label: 'Add a note', sub: 'Record what you found or did', icon: MessageSquarePlus, title: 'Add a note', confirm: 'Save note' },
+  { k: 'assign', label: 'Assign an officer', sub: 'Hand it to a colleague', icon: UserPlus, title: 'Assign an officer', confirm: 'Assign' },
+  { k: 'transfer', label: 'Send to another Bureau', sub: 'Move it to the right desk', icon: ArrowRightLeft, title: 'Send to another Bureau', confirm: 'Send the case' },
+  { k: 'escalate', label: 'Escalate', sub: 'Ask a senior officer to step in', icon: TrendingUp, title: 'Escalate this case', confirm: 'Escalate' },
+  { k: 'dispose', label: 'Close the case', sub: 'Record how it was resolved', icon: CheckCheck, title: 'Close this case', confirm: 'Close the case' },
+]
+
+function Fact({ label, children }: any) {
+  return <div><dt className="eyebrow">{label}</dt><dd className="mt-1 text-[14px] text-slate-800">{children || '—'}</dd></div>
 }
 
 export default function CaseDetail() {
@@ -26,6 +40,7 @@ export default function CaseDetail() {
   const { data: clock } = useApi<any>('/clock')
   const { data: officers } = useApi<any>('/meta/officers', false)
   const { data: meta } = useApi<any>('/meta', false)
+  const { data: allOv } = useApi<any>(c?.overlap ? '/overlaps?status=all' : null)
   const [ver, setVer] = useState<any>(null)
   const { data: docs, reload: reloadDocs } = useApi<any>(`/cases/${enc}/documents`)
   const [uploadErr, setUploadErr] = useState('')
@@ -33,6 +48,8 @@ export default function CaseDetail() {
   const [form, setForm] = useState<any>({})
   const [err, setErr] = useState('')
   const [ack, setAck] = useState(false)
+  const [audit, setAudit] = useState(false)
+  const [how, setHow] = useState(false)
   const me = useRole()
   const [linking, setLinking] = useState(false)
   const [linkFind, setLinkFind] = useState('')
@@ -44,7 +61,10 @@ export default function CaseDetail() {
   if (error && !c) return <ErrorBox msg={error} />
   const ov = c.overlap
   const active = ov && ov.status !== 'RESOLVED' && ov.status !== 'DISMISSED'
-  const resolutionLabel = c.resolution.method === 'ID' ? 'matched by AICTE ID' : `matched by name (${Math.round(c.resolution.confidence)}% confidence)`
+  const cluster = (allOv?.items || []).find((x: any) => x.cluster_id === ov?.cluster_id)
+  const others: any[] = (cluster?.cases || []).filter((x: any) => x.case_id !== c.case_id)
+  const resolutionLabel = c.resolution.method === 'ID' ? 'matched by its AICTE ID' : `matched by name (${Math.round(c.resolution.confidence)}% sure)`
+  const canLink = me.role !== 'REGIONAL'
 
   const linkNeedle = linkFind.trim().toLowerCase()
   const linkable = (pool?.items || []).filter((x: any) => x.case_id !== c.case_id &&
@@ -59,19 +79,13 @@ export default function CaseDetail() {
   async function verify() { setVer(await api(`/audit/verify?case_id=${enc}`)) }
   const allowed: string[] = c.allowed_actions || []
   const needsAck = !!c.guard && !!act && c.guard.applies_to.includes(act) && (c.guard.level === 'ack' || (c.guard.level === 'block' && me.role === 'SENIOR'))
-  const ACTIONS: any[] = [
-    { k: 'remark', label: 'Add remark', icon: MessageSquarePlus, tone: 'border-slate-200 text-slate-700 hover:bg-slate-50' },
-    { k: 'assign', label: 'Assign officer', icon: UserPlus, tone: 'border-slate-200 text-slate-700 hover:bg-slate-50' },
-    { k: 'transfer', label: 'Transfer', icon: ArrowRightLeft, tone: 'border-sky-200 text-sky-700 hover:bg-sky-50' },
-    { k: 'escalate', label: 'Escalate', icon: TrendingUp, tone: 'border-orange-200 text-orange-700 hover:bg-orange-50' },
-    { k: 'dispose', label: 'Dispose', icon: CheckCheck, tone: 'border-emerald-200 text-emerald-700 hover:bg-emerald-50' },
-  ]
+  const current = ACTIONS.find((a) => a.k === act)
   function onFile(e: any) {
     const f: File = e.target.files?.[0]
     e.target.value = ''
     if (!f) return
     setUploadErr('')
-    if (f.size > 2 * 1024 * 1024) { setUploadErr('File is larger than 2 MB'); return }
+    if (f.size > 2 * 1024 * 1024) { setUploadErr('That file is larger than 2 MB.'); return }
     const rd = new FileReader()
     rd.onload = async () => {
       const b64 = String(rd.result).split(',')[1] || ''
@@ -88,210 +102,256 @@ export default function CaseDetail() {
   }
 
   return (
-    <div className="mx-auto max-w-[1300px] space-y-5">
-      <Link to="/cases" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"><ArrowLeft size={15} /> All cases</Link>
+    <div className="mx-auto max-w-[1240px]">
+      <Link to="/cases" className="rise mb-4 inline-flex items-center gap-1 text-[13px] font-medium text-slate-500 hover:text-slate-900">← All cases</Link>
 
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight">{c.case_id}</h1>
-            <StatusChip status={c.status} /><BureauBadge code={c.bureau} />
-            {c.escalation_level > 0 && <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[11px] font-bold text-orange-700">ESCALATED L{c.escalation_level}</span>}
+      {/* ---------- cover ---------- */}
+      <header className="rise mb-6 grid gap-5 lg:grid-cols-[1fr_auto] lg:items-end">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <span className="case-id text-[15px] text-navy-2">{c.case_id}</span>
+            <StatusChip status={c.status} /><BureauBadge code={c.bureau} full />
+            {c.escalation_level > 0 && <span className="rounded-[4px] border border-orange-200 bg-orange-50 px-1.5 py-px text-[11px] font-bold uppercase tracking-wide text-orange-700">Escalated · level {c.escalation_level}</span>}
           </div>
-          <Link to={`/institutions/${c.institution.aicte_id}`} className="mt-1 block text-slate-600 hover:underline">{c.institution.name}</Link>
+          <h1 className="font-display mt-2 text-[1.875rem] font-semibold leading-[1.12] text-slate-900 md:text-[2.25rem]">
+            <Link to={`/institutions/${c.institution.aicte_id}`} className="hover:underline decoration-slate-300 underline-offset-4">{c.institution.name}</Link>
+          </h1>
+          <p className="mt-1.5 text-[15px] text-slate-600">{c.category} · {c.institution.city}, {c.institution.region} region · received {fmtDate(c.received_on)} via {c.source}</p>
         </div>
-        <div className="flex items-center gap-4 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-slate-200/70">
-          <div><div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Prescribed timeline</div>
-            <div className="num text-sm text-slate-600">{c.sla.days} days · due {fmtDate(c.expected_disposal)}</div></div>
-          <SlaChip sla={c.sla} />
-          {clock && <div className="border-l border-slate-200 pl-4"><Countdown dueDate={c.expected_disposal} serverNow={clock.now} closed={c.sla.state === 'CLOSED'} /></div>}
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2 rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200/70">
-        <span className="mr-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Actions</span>
-        {ACTIONS.map((a) => {
-          const ok = allowed.includes(a.k)
-          return (
-            <button key={a.k} disabled={!ok} onClick={() => { setAct(a.k); setForm({}); setErr(''); setAck(false) }}
-              className={cx('flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition', ok ? a.tone : 'cursor-not-allowed border-slate-100 text-slate-300')}>
-              <a.icon size={15} /> {a.label}</button>)
-        })}
-        {me.role !== 'REGIONAL' && (
-          <button onClick={() => { setLinking(true); setLinkErr('') }}
-            className="flex items-center gap-1.5 rounded-lg border border-violet-200 px-3 py-1.5 text-sm font-medium text-violet-700 transition hover:bg-violet-50">
-            <Link2 size={15} /> Link to another case…</button>)}
-        {allowed.length === 0 && (
-          <span className="ml-auto flex items-center gap-1.5 text-xs text-slate-400"><Lock size={13} /> {c.status === 'Disposed' ? 'Case is closed' : 'Read-only for your role'}</span>)}
-      </div>
-
-      {active && (
-        <div className="flex flex-wrap items-center gap-4 rounded-xl border border-red-200 bg-red-50 p-4">
-          <div className="rounded-full bg-red-100 p-2 text-red-600 pulse-red"><Siren size={20} /></div>
-          <div className="flex-1">
-            <div className="font-bold text-red-700">Potential Overlapping Cases — Coordination Required</div>
-            <div className="text-sm text-red-700/90">The same institution has related complaints with {ov.other_bureaus.join(', ')}. Avoid duplicate action — coordinate before proceeding.</div>
+        <div className="rounded-xl border border-line bg-sheet p-4 shadow-sm lg:min-w-[270px]">
+          <div className="eyebrow">Time left to respond</div>
+          <div className="mt-1.5 flex items-baseline gap-3">
+            {clock ? <Countdown dueDate={c.expected_disposal} serverNow={clock.now} closed={c.sla.state === 'CLOSED'} /> : <span>—</span>}
           </div>
-          <Link to={`/overlaps?open=${ov.cluster_id}`} className="rounded-lg bg-red-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-red-700">Why flagged &amp; coordinate</Link>
-        </div>)}
-      {c.room && <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-800">
-        Linked in <Link className="font-semibold underline" to={`/rooms/${c.room.id}`}>{c.room.id}</Link> · lead Bureau <b>{c.room.lead_bureau}</b>
-        {c.room.lead_bureau !== c.bureau && ` — this Bureau follows ${c.room.lead_bureau}'s lead`} · {c.room.status}</div>}
-      {c.guard && c.guard.level === 'block' && (
-        <div className="flex items-start gap-3 rounded-xl border border-indigo-300 bg-indigo-100/60 p-3.5 text-sm text-indigo-900">
-          <Lock size={17} className="mt-0.5 shrink-0" /><span><b>Actions restricted.</b> {c.guard.message} You can still add remarks, assign an officer and attach documents.</span></div>)}
-      {c.guard && c.guard.level === 'ack' && c.guard.code === 'LEAD_WITH_OPEN_FOLLOWERS' && (
-        <div className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 p-3.5 text-sm text-amber-900">
-          <Siren size={17} className="mt-0.5 shrink-0" /><span>{c.guard.message}</span></div>)}
+          <div className="mt-2 flex items-center justify-between gap-3 text-[12.5px] text-slate-500">
+            <span>{c.sla.state === 'CLOSED' ? 'Closed' : `Due ${fmtDate(c.expected_disposal)} · ${c.sla.days}-day limit`}</span>
+            <SlaChip sla={c.sla} />
+          </div>
+        </div>
+      </header>
 
-      <div className="grid gap-5 lg:grid-cols-5">
-        <div className="space-y-5 lg:col-span-2">
-          <Card title="Case details">
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-3.5">
-              <Field label="Category">{c.category}</Field>
-              <Field label="Severity"><span className="num">{c.severity} / 5</span></Field>
-              <Field label="Date of receipt">{fmtDate(c.received_on)}</Field>
-              <Field label="Source">{c.source}</Field>
-              <Field label="Assigned officer">{c.assigned_officer.name}<div className="text-xs text-slate-400">{c.assigned_officer.designation}</div></Field>
-              <Field label="Reference no.">{c.reference_no}</Field>
-              <Field label="Last action">{c.last_action}<div className="text-xs text-slate-400">{fmtTs(c.last_action_at)}</div></Field>
-              <Field label="Next action required">{c.next_action}</Field>
-              {c.outcome && <div className="col-span-2"><Field label="Outcome">{c.outcome}</Field></div>}
-            </dl>
-            <div className="mt-4 border-t border-slate-100 pt-3"><dt className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Complaint</dt>
-              <p className="mt-1 text-sm leading-relaxed text-slate-700">{c.description}</p></div>
-          </Card>
-
-          <Card title="Institution matching">
-            <div className="space-y-2 text-sm">
-              <div className="rounded-lg bg-slate-50 p-3"><div className="text-[11px] uppercase tracking-wider text-slate-400">Submitted as</div>
-                <div className="font-medium text-slate-800">“{c.submitted_institution_name}”</div>
-                <div className="text-xs text-slate-500">{c.submitted_aicte_id ? `AICTE ID quoted: ${c.submitted_aicte_id}` : 'No AICTE ID on the complaint'}</div></div>
-              <div className="flex items-center gap-2 text-emerald-700"><BadgeCheck size={16} /> Resolved to <b>{c.institution.aicte_id}</b> — {resolutionLabel}</div>
+      {/* ---------- notices ---------- */}
+      <div className="mb-6 space-y-3 empty:hidden">
+        {active && (
+          <div className="rise rise-2 overflow-hidden rounded-xl border border-red-200 bg-red-50">
+            <div className="flex flex-wrap items-center gap-4 p-4">
+              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-red-100 text-red-600 pulse-red"><Siren size={21} /></div>
+              <div className="min-w-0 flex-1 basis-64">
+                <div className="font-display text-[1.1875rem] font-semibold text-red-800">Potential Overlapping Cases — Coordination Required</div>
+                <div className="text-[14px] text-red-800/90">{ov.other_bureaus.join(' and ')} {ov.other_bureaus.length > 1 ? 'are' : 'is'} also dealing with this institution. Talk to them before you act so the work is not duplicated.</div>
+              </div>
+              <Link to={`/overlaps?open=${ov.cluster_id}`} className="btn btn-danger">See why and coordinate</Link>
             </div>
-          </Card>
+          </div>)}
+        {c.room && (
+          <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-[14px] text-indigo-900">
+            Part of coordination room <Link className="case-id underline" to={`/rooms/${c.room.id}`}>{c.room.id}</Link>. {c.room.lead_bureau === c.bureau ? <>Your Bureau (<b>{c.room.lead_bureau}</b>) leads.</> : <><b>{c.room.lead_bureau}</b> leads, and this Bureau follows its decisions.</>} <span className="text-indigo-700">({c.room.status === 'OPEN' ? 'still open' : c.room.status.toLowerCase()})</span></div>)}
+        {c.guard && c.guard.level === 'block' && (
+          <div className="flex items-start gap-3 rounded-xl border border-indigo-300 bg-indigo-100/60 px-4 py-3 text-[14px] text-indigo-900">
+            <Lock size={17} className="mt-0.5 shrink-0" /><span><b>Some actions are paused.</b> {c.guard.message} You can still add notes, assign an officer and attach documents.</span></div>)}
+        {c.guard && c.guard.level === 'ack' && c.guard.code === 'LEAD_WITH_OPEN_FOLLOWERS' && (
+          <div className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-[14px] text-amber-900">
+            <Siren size={17} className="mt-0.5 shrink-0" /><span>{c.guard.message}</span></div>)}
+      </div>
 
-          <Card title="Supporting documents"
-            right={allowed.includes('remark') ? (
-              <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
-                <Upload size={13} /> Add document<input type="file" className="hidden" onChange={onFile} /></label>) : undefined}>
-            {uploadErr && <div className="mb-2 rounded-lg bg-red-50 p-2 text-xs text-red-700">{uploadErr}</div>}
-            <ul className="space-y-2">
-              {(docs?.items || []).map((d: any) => (
-                <li key={d.id} className="flex items-center gap-2.5 rounded-lg bg-slate-50 p-2.5 text-sm">
-                  <Paperclip size={15} className="shrink-0 text-slate-400" />
-                  <div className="min-w-0 flex-1"><div className="truncate font-medium text-slate-800">{d.filename}</div>
-                    <div className="text-[11px] text-slate-400">{(d.size / 1024).toFixed(1)} KB · {d.uploaded_by} · {fmtTs(d.uploaded_at)}</div></div>
-                  <span title={`SHA-256 ${d.sha256}`} className={cx('rounded px-1.5 py-0.5 text-[10px] font-bold', d.verified ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700')}>{d.verified ? 'HASH OK' : 'ALTERED'}</span>
-                  <button onClick={() => download(`/documents/${d.id}/download`, d.filename)} className="rounded-md p-1.5 text-slate-500 hover:bg-white"><Download size={15} /></button>
-                </li>))}
-              {(docs?.items || []).length === 0 && <li className="text-sm text-slate-400">No documents attached.</li>}
-            </ul>
-          </Card>
+      {/* ---------- what to do ---------- */}
+      <section className="rise rise-1 mb-6 rounded-xl border border-line bg-sheet shadow-sm" aria-label="Actions">
+        {c.next_action && c.status !== 'Disposed' && (
+          <div className="flex items-start gap-3 rounded-t-xl border-b border-line bg-amber-50/70 px-5 py-3">
+            <Sparkles size={17} className="mt-0.5 shrink-0 text-saffron" />
+            <p className="text-[14.5px] text-slate-800"><span className="font-semibold">Next step:</span> {c.next_action}</p>
+          </div>)}
+        <div className="p-5">
+          <div className="eyebrow mb-3">What would you like to do?</div>
+          <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-5">
+            {ACTIONS.map((a) => {
+              const ok = allowed.includes(a.k)
+              return (
+                <button key={a.k} disabled={!ok} onClick={() => { setAct(a.k); setForm({}); setErr(''); setAck(false) }}
+                  title={ok ? undefined : c.status === 'Disposed' ? 'This case is closed' : 'Your role cannot do this on this case'}
+                  className={cx('flex items-start gap-3 rounded-lg border p-3 text-left transition',
+                    ok ? 'border-line bg-white hover:-translate-y-0.5 hover:border-navy-2/50 hover:shadow-md' : 'cursor-not-allowed border-line/70 bg-slate-100/50 opacity-55')}>
+                  <span className={cx('grid h-9 w-9 shrink-0 place-items-center rounded-lg', ok ? 'bg-navy text-white' : 'bg-slate-200 text-slate-400')}><a.icon size={17} /></span>
+                  <span><span className="block text-[14px] font-semibold leading-tight text-slate-900">{a.label}</span><span className="mt-0.5 block text-[12px] leading-snug text-slate-500">{a.sub}</span></span>
+                </button>)
+            })}
+          </div>
+          {allowed.length === 0 && (
+            <p className="mt-3 flex items-center gap-2 text-[13px] text-slate-500"><Lock size={14} />
+              {c.status === 'Disposed' ? 'This case is closed, so nothing more can be done.' : 'You can read this case but not act on it. Only the Bureau that holds it can.'}</p>)}
         </div>
+      </section>
 
-        <Card title="Action history & movement" className="lg:col-span-3"
-          right={<button onClick={verify} className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"><ShieldCheck size={14} /> Verify integrity</button>}>
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* ---------- story ---------- */}
+        <Card className="rise rise-2 lg:col-span-2" title="What has happened so far" subtitle="Newest first. Every step is recorded and cannot be quietly changed."
+          right={<button onClick={verify} className="btn btn-ghost btn-sm"><ShieldCheck size={14} /> Check the record</button>}>
           {ver && (
-            <div className={cx('mb-3 flex items-center gap-2 rounded-lg p-2.5 text-sm', ver.ok ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700')}>
-              {ver.ok ? <ShieldCheck size={16} /> : <ShieldAlert size={16} />}
-              {ver.ok ? `Audit trail intact — ${ver.checked} records, hash chain verified.` : `Tampering detected at record #${ver.first_break.seq}: ${ver.first_break.reason}.`}
+            <div className={cx('mb-4 flex items-center gap-2 rounded-lg p-3 text-sm', ver.ok ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-800')}>
+              {ver.ok ? <ShieldCheck size={17} /> : <ShieldAlert size={17} />}
+              {ver.ok ? `The record is intact. ${ver.checked} entries were checked and none has been altered.` : `A change was detected at entry #${ver.first_break.seq}: ${ver.first_break.reason}.`}
             </div>)}
-          <ol className="relative space-y-4 border-l-2 border-slate-100 pl-6">
+          <ol className="relative space-y-5 border-l border-line pl-7">
             {(h?.items || []).slice().reverse().map((e: any) => {
               const Icon = ICONS[e.action_type] || FileText
               return (
                 <li key={e.seq} className="relative">
-                  <span className={cx('absolute -left-[37px] grid h-7 w-7 place-items-center rounded-full ring-4 ring-white', TONE[e.action_type] || 'bg-slate-100 text-slate-600')}><Icon size={14} /></span>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-semibold text-slate-800">{e.action_type.replace('_', ' ')}</span>
-                    {e.from_bureau && e.to_bureau && e.from_bureau !== e.to_bureau && <span className="flex items-center gap-1 text-xs"><BureauBadge code={e.from_bureau} /> → <BureauBadge code={e.to_bureau} /></span>}
-                    <span className="text-xs text-slate-400">{fmtTs(e.ts)}</span>
+                  <span className={cx('absolute -left-[41px] grid h-8 w-8 place-items-center rounded-full ring-1 ring-inset ring-offset-4 ring-offset-sheet', TONE[e.action_type] || 'bg-slate-100 text-slate-600 ring-slate-200')}><Icon size={15} /></span>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="text-[15px] font-semibold text-slate-900">{LABEL[e.action_type] || e.action_type.replace(/_/g, ' ').toLowerCase()}</span>
+                    {e.from_bureau && e.to_bureau && e.from_bureau !== e.to_bureau && <span className="flex items-center gap-1.5 text-xs"><BureauBadge code={e.from_bureau} /> → <BureauBadge code={e.to_bureau} /></span>}
+                    <span className="text-[12.5px] text-slate-400">{fmtTs(e.ts)}</span>
                   </div>
-                  <p className="mt-0.5 text-sm text-slate-600">{e.remarks}</p>
+                  <p className="mt-1 text-[14px] leading-relaxed text-slate-700">{e.remarks}</p>
                   {(e.documents || []).length > 0 && (
-                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    <div className="mt-2 flex flex-wrap gap-1.5">
                       {e.documents.map((d: any) => (
                         <button key={d.id} onClick={() => download(`/documents/${d.id}/download`, d.filename)}
-                          className="flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200"><Paperclip size={11} />{d.filename}</button>))}
+                          className="flex items-center gap-1 rounded-md border border-line bg-white px-2 py-0.5 text-[12px] font-medium text-slate-600 hover:bg-slate-50"><Paperclip size={11} />{d.filename}</button>))}
                     </div>)}
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 text-[12px] text-slate-400">
                     <span className="flex items-center gap-1">{e.actor.name === 'System (SLA engine)' ? <Zap size={11} /> : <UserCheck size={11} />}{e.actor.name} · {e.actor.bureau}</span>
-                    <span className="flex items-center gap-1 font-mono" title={`prev ${e.prev_hash}\nhash ${e.hash}`}><Hash size={10} />{e.hash.slice(0, 10)}…</span>
+                    {audit && <span className="font-mono text-[11px]" title={`previous ${e.prev_hash}\nthis entry ${e.hash}`}>fingerprint {e.hash.slice(0, 12)}</span>}
                   </div>
                 </li>)
             })}
           </ol>
+          <button onClick={() => setAudit((v) => !v)} className="mt-5 text-[12.5px] font-semibold text-slate-500 hover:text-slate-900">{audit ? 'Hide' : 'Show'} technical audit details</button>
         </Card>
+
+        {/* ---------- sidebar ---------- */}
+        <div className="space-y-6">
+          <Card className="rise rise-3" title="The complaint">
+            <blockquote className="font-display border-l-2 border-saffron pl-4 text-[1.0625rem] leading-relaxed text-slate-800">{c.description}</blockquote>
+            <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4">
+              <Fact label="Category">{c.category}</Fact>
+              <Fact label="Seriousness"><span className="num">{c.severity} of 5</span></Fact>
+              <Fact label="Looked after by">{c.assigned_officer.name}<div className="text-xs text-slate-400">{c.assigned_officer.designation}</div></Fact>
+              <Fact label="Reference">{c.reference_no}</Fact>
+              <Fact label="Last action">{c.last_action}<div className="text-xs text-slate-400">{fmtTs(c.last_action_at)}</div></Fact>
+              <Fact label="Source">{c.source}</Fact>
+              {c.outcome && <div className="col-span-2"><Fact label="Outcome">{c.outcome}</Fact></div>}
+            </dl>
+          </Card>
+
+          <Card className="rise rise-3" title="Related cases" subtitle={active ? 'Other Bureaus are dealing with this institution too.' : undefined}
+            right={canLink && <button onClick={() => { setLinking(true); setLinkErr('') }} className="btn btn-ghost btn-sm"><Link2 size={14} /> Link a case</button>}>
+            {others.length > 0 ? (
+              <ul className="-mx-1 divide-y divide-line">
+                {others.map((o: any) => (
+                  <li key={o.case_id} className="px-1 py-3">
+                    <div className="flex flex-wrap items-center gap-2"><BureauBadge code={o.bureau} /><Link to={`/cases/${o.case_id}`} className="case-id text-navy-2 hover:underline">{o.case_id}</Link><StatusChip status={o.status} /></div>
+                    <div className="mt-1 text-[13px] text-slate-600">{o.assigned_officer.name} · {o.category}</div>
+                    <div className="text-[12.5px] text-slate-400">Last: {o.last_action || '—'}</div>
+                  </li>))}
+              </ul>
+            ) : active ? <p className="text-sm text-slate-500">Loading the other cases…</p>
+              : <p className="text-sm text-slate-500">No other case is linked to this one. If you know of one the system missed, link it.</p>}
+            {active && <div className="mt-3 flex flex-wrap gap-2 border-t border-line pt-3">
+              <Link to={`/overlaps?open=${ov.cluster_id}`} className="btn btn-ghost btn-sm">Why were they flagged?</Link>
+              {c.room && <Link to={`/rooms/${c.room.id}`} className="btn btn-primary btn-sm">Open the room</Link>}
+            </div>}
+          </Card>
+
+          <Card className="rise rise-4" title="Documents"
+            right={allowed.includes('remark') ? (
+              <label className="btn btn-ghost btn-sm cursor-pointer"><Upload size={13} /> Add a file<input type="file" className="hidden" onChange={onFile} /></label>) : undefined}>
+            {uploadErr && <div className="mb-2 rounded-lg bg-red-50 p-2 text-xs text-red-700">{uploadErr}</div>}
+            <ul className="space-y-2">
+              {(docs?.items || []).map((d: any) => (
+                <li key={d.id} className="flex items-center gap-3 rounded-lg border border-line bg-white p-2.5 text-sm">
+                  <Paperclip size={15} className="shrink-0 text-slate-400" />
+                  <div className="min-w-0 flex-1"><div className="truncate font-medium text-slate-800">{d.filename}</div>
+                    <div className="text-[11.5px] text-slate-400">{(d.size / 1024).toFixed(1)} KB · {d.uploaded_by} · {fmtTs(d.uploaded_at)}</div></div>
+                  <span title={`SHA-256 ${d.sha256}`} className={cx('rounded-[4px] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide', d.verified ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700')}>{d.verified ? 'Unchanged' : 'Altered'}</span>
+                  <button onClick={() => download(`/documents/${d.id}/download`, d.filename)} aria-label={`Download ${d.filename}`} className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100"><Download size={15} /></button>
+                </li>))}
+              {(docs?.items || []).length === 0 && <li className="text-sm text-slate-400">No documents attached.</li>}
+            </ul>
+          </Card>
+
+          <section className="rounded-xl border border-dashed border-slate-300">
+            <button onClick={() => setHow((v) => !v)} aria-expanded={how} className="flex w-full items-center gap-2 px-4 py-3 text-left text-[13px] font-semibold text-slate-600 hover:text-slate-900">
+              <span className="flex-1">How was the institution identified?</span><ChevronDown size={15} className={cx('transition', how && 'rotate-180')} /></button>
+            {how && (
+              <div className="space-y-2 border-t border-dashed border-slate-300 px-4 py-3 text-[13.5px]">
+                <div className="rounded-lg bg-slate-100 p-3"><div className="eyebrow">Written in the complaint as</div>
+                  <div className="mt-0.5 font-medium text-slate-800">“{c.submitted_institution_name}”</div>
+                  <div className="text-xs text-slate-500">{c.submitted_aicte_id ? `AICTE ID given: ${c.submitted_aicte_id}` : 'No AICTE ID was given'}</div></div>
+                <p className="text-emerald-800">Matched to <b>{c.institution.aicte_id}</b>, {resolutionLabel}.</p>
+              </div>)}
+          </section>
+        </div>
       </div>
+
+      {/* ---------- action drawer ---------- */}
+      <Drawer open={!!act} onClose={() => setAct(null)} width={480}
+        title={<div><div className="case-id text-slate-400">{c.case_id}</div><div className="font-display text-[1.5rem] font-semibold text-slate-900">{current?.title}</div></div>}>
+        <div className="space-y-5">
+          {act === 'transfer' && (
+            <label className="block"><span className="mb-1.5 block text-sm font-semibold">Which Bureau should take it?</span>
+              <select value={form.to_bureau || ''} onChange={(e) => setForm({ ...form, to_bureau: e.target.value })} className="field">
+                <option value="">Choose a Bureau or Cell…</option>
+                {(meta?.bureaus || []).filter((b: any) => b.code !== c.bureau).map((b: any) => <option key={b.code} value={b.code}>{b.name} ({b.code})</option>)}
+              </select></label>)}
+          {act === 'assign' && (
+            <label className="block"><span className="mb-1.5 block text-sm font-semibold">Who in {c.bureau} should look after it?</span>
+              <select value={form.officer_id || ''} onChange={(e) => setForm({ ...form, officer_id: e.target.value })} className="field">
+                <option value="">Choose an officer…</option>
+                {(officers?.items || []).filter((o: any) => o.bureau_code === c.bureau).map((o: any) => <option key={o.id} value={o.id}>{o.name} — {o.designation}</option>)}
+              </select></label>)}
+          <label className="block"><span className="mb-1.5 block text-sm font-semibold">
+            {act === 'dispose' ? 'How was it resolved?' : act === 'remark' ? 'Your note' : 'Why? (optional, but helps the next person)'}
+            {(act === 'dispose' || act === 'remark') && <span className="ml-1.5 text-xs font-medium text-red-600">Required</span>}</span>
+            <textarea rows={4} value={form.remarks || ''} onChange={(e) => setForm({ ...form, remarks: e.target.value })} className="field" placeholder="This is added to the case history" /></label>
+          {act !== 'dispose' && act !== 'remark' && (
+            <label className="block"><span className="mb-1.5 block text-sm font-semibold">What should happen next? <span className="font-normal text-slate-400">(optional)</span></span>
+              <input value={form.next_action || ''} onChange={(e) => setForm({ ...form, next_action: e.target.value })} className="field" /></label>)}
+          {act === 'transfer' && c.transfer_count >= 2 && <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-[13px] text-amber-900">This case has already moved {c.transfer_count} times. Another transfer will raise a “passed around” alert.</div>}
+          {needsAck && (
+            <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+              <div className="flex items-center gap-2 font-display text-[1.0625rem] font-semibold"><Siren size={17} /> Coordinate before you act</div>
+              <p className="mt-1.5">{c.guard.message}</p>
+              <Link to={c.guard.room_id ? `/rooms/${c.guard.room_id}` : `/overlaps?open=${c.guard.cluster_id}`} className="mt-2 inline-block font-semibold underline">
+                {c.guard.room_id ? `Open coordination room ${c.guard.room_id}` : 'Review the overlap and open a coordination room'}</Link>
+              <label className="mt-3 flex cursor-pointer items-start gap-2.5 text-[13.5px]">
+                <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="mt-1 h-4 w-4" />
+                <span>I have spoken to {(c.guard.other_bureaus || []).join(', ') || 'the other Bureaus'} and want to go ahead. This is written in the case history.</span>
+              </label>
+            </div>)}
+          {err && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">{err}</div>}
+          <button onClick={submit} disabled={needsAck && !ack} className="btn btn-primary w-full !py-3">{current?.confirm}</button>
+          <p className="text-center text-[12px] text-slate-400">Saved with the time and your Bureau, and added to the permanent record.</p>
+        </div>
+      </Drawer>
+
+      {/* ---------- link drawer ---------- */}
       <Drawer open={linking} onClose={() => setLinking(false)} width={500}
-        title={<div><div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{c.case_id}</div>
-          <div className="font-bold text-slate-900">Link to another case</div></div>}>
+        title={<div><div className="case-id text-slate-400">{c.case_id}</div><div className="font-display text-[1.5rem] font-semibold text-slate-900">Link to another case</div></div>}>
         <div className="space-y-4">
-          <p className="text-sm text-slate-600">Use this when the engine missed a connection. Only cases of {c.institution.name} can be linked; the link is added to both cases' audit trail and starts a coordination issue.</p>
-          <input value={linkFind} onChange={(e) => setLinkFind(e.target.value)} placeholder="Search by case ID, category or Bureau…"
-            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-navy-2" />
-          <ul className="max-h-64 divide-y divide-slate-100 overflow-auto rounded-lg ring-1 ring-slate-200">
-            {linkable.length === 0 && <li className="p-3 text-xs text-slate-400">{pool ? 'No other cases of this institution match.' : 'Loading…'}</li>}
+          <p className="text-sm leading-relaxed text-slate-600">Use this when you know two complaints belong together but the system did not connect them. Only cases at {c.institution.name} can be linked. The link is written to both cases and starts a coordination issue.</p>
+          <input value={linkFind} onChange={(e) => setLinkFind(e.target.value)} placeholder="Search by case number, category or Bureau…" className="field" />
+          <ul className="max-h-72 divide-y divide-line overflow-auto rounded-lg border border-line bg-white">
+            {linkable.length === 0 && <li className="p-4 text-sm text-slate-400">{pool ? 'No other cases of this institution match.' : 'Loading…'}</li>}
             {linkable.map((x: any) => {
               const already = !!c.overlap && x.overlap?.cluster_id === c.overlap.cluster_id
               return (
                 <li key={x.case_id}>
-                  <label className={cx('flex cursor-pointer items-center gap-2.5 px-3 py-2 text-sm hover:bg-slate-50', linkTarget === x.case_id && 'bg-violet-50')}>
+                  <label className={cx('flex cursor-pointer items-center gap-3 px-3.5 py-2.5 text-sm hover:bg-slate-50', linkTarget === x.case_id && 'bg-indigo-50')}>
                     <input type="radio" name="link-target" checked={linkTarget === x.case_id} onChange={() => setLinkTarget(x.case_id)} />
                     <BureauBadge code={x.bureau} />
-                    <span className="font-mono text-xs font-semibold text-navy-2">{x.case_id}</span>
-                    <span className="flex-1 truncate text-xs text-slate-500">{x.category}</span>
-                    {already && <span className="rounded bg-indigo-50 px-1.5 text-[10px] font-semibold text-indigo-700">same overlap</span>}
+                    <span className="case-id text-navy-2">{x.case_id}</span>
+                    <span className="min-w-0 flex-1 truncate text-xs text-slate-500">{x.category}</span>
+                    {already && <span className="rounded-[4px] bg-indigo-100 px-1.5 text-[10px] font-bold uppercase text-indigo-700">Linked</span>}
                     <StatusChip status={x.status} />
                   </label>
                 </li>)
             })}
           </ul>
-          <label className="block"><span className="mb-1 block text-sm font-medium">Why are these cases related? (required)</span>
-            <textarea rows={3} value={linkWhy} onChange={(e) => setLinkWhy(e.target.value)} placeholder="Recorded in both cases' history"
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-navy-2" /></label>
-          {linkErr && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{linkErr}</div>}
-          <button onClick={submitLink} disabled={!linkTarget || !linkWhy.trim()}
-            className="w-full rounded-lg bg-navy py-2.5 text-sm font-semibold text-white hover:bg-navy-2 disabled:cursor-not-allowed disabled:opacity-40">Link cases</button>
-        </div>
-      </Drawer>
-      <Drawer open={!!act} onClose={() => setAct(null)} width={460}
-        title={<div><div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{c.case_id}</div>
-          <div className="font-bold capitalize text-slate-900">{act === 'assign' ? 'Assign officer' : act === 'dispose' ? 'Dispose case' : act}</div></div>}>
-        <div className="space-y-4">
-          {act === 'transfer' && (
-            <label className="block"><span className="mb-1 block text-sm font-medium">Transfer to</span>
-              <select value={form.to_bureau || ''} onChange={(e) => setForm({ ...form, to_bureau: e.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                <option value="">Select Bureau / Cell…</option>
-                {(meta?.bureaus || []).filter((b: any) => b.code !== c.bureau).map((b: any) => <option key={b.code} value={b.code}>{b.code} — {b.name}</option>)}
-              </select></label>)}
-          {act === 'assign' && (
-            <label className="block"><span className="mb-1 block text-sm font-medium">Officer ({c.bureau})</span>
-              <select value={form.officer_id || ''} onChange={(e) => setForm({ ...form, officer_id: e.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                <option value="">Select officer…</option>
-                {(officers?.items || []).filter((o: any) => o.bureau_code === c.bureau).map((o: any) => <option key={o.id} value={o.id}>{o.name} — {o.designation}</option>)}
-              </select></label>)}
-          <label className="block"><span className="mb-1 block text-sm font-medium">{act === 'dispose' ? 'Outcome / disposal remarks (required)' : 'Remarks'}{act === 'remark' ? ' (required)' : ''}</span>
-            <textarea rows={4} value={form.remarks || ''} onChange={(e) => setForm({ ...form, remarks: e.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-navy-2" placeholder="Visible in the case history and written to the audit trail" /></label>
-          {act !== 'dispose' && act !== 'remark' && (
-            <label className="block"><span className="mb-1 block text-sm font-medium">Next action required (optional)</span>
-              <input value={form.next_action || ''} onChange={(e) => setForm({ ...form, next_action: e.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" /></label>)}
-          {act === 'transfer' && c.transfer_count >= 2 && <div className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800">This case has already moved {c.transfer_count} times. A further transfer will raise a ping-pong alert.</div>}
-          {err && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{err}</div>}
-          {needsAck && (
-            <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-3.5 text-sm text-amber-900">
-              <div className="flex items-center gap-2 font-bold"><Siren size={16} /> Coordinate before acting</div>
-              <p className="mt-1">{c.guard.message}</p>
-              <Link to={c.guard.room_id ? `/rooms/${c.guard.room_id}` : `/overlaps?open=${c.guard.cluster_id}`} className="mt-2 inline-block font-semibold underline">
-                {c.guard.room_id ? `Open Coordination Room ${c.guard.room_id}` : 'Review the overlap and open a Coordination Room'}</Link>
-              <label className="mt-3 flex cursor-pointer items-start gap-2 text-[13px]">
-                <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="mt-0.5" />
-                <span>I have checked with {(c.guard.other_bureaus || []).join(', ') || 'the other Bureaus'} and want to proceed. This acknowledgement is recorded in the case history.</span>
-              </label>
-            </div>)}
-          <button onClick={submit} disabled={needsAck && !ack} className="w-full rounded-lg bg-navy py-2.5 text-sm font-semibold text-white hover:bg-navy-2 disabled:cursor-not-allowed disabled:opacity-40">Confirm</button>
-          <p className="text-[11px] text-slate-400">Every action is time-stamped, attributed to your Bureau and added to the tamper-evident hash chain.</p>
+          <label className="block"><span className="mb-1.5 block text-sm font-semibold">Why do these belong together? <span className="ml-1 text-xs font-medium text-red-600">Required</span></span>
+            <textarea rows={3} value={linkWhy} onChange={(e) => setLinkWhy(e.target.value)} placeholder="This is written to both cases" className="field" /></label>
+          {linkErr && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">{linkErr}</div>}
+          <button onClick={submitLink} disabled={!linkTarget || !linkWhy.trim()} className="btn btn-primary w-full !py-3">Link the cases</button>
         </div>
       </Drawer>
     </div>

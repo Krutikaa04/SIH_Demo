@@ -1,231 +1,281 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Bell, BarChart3, FilePlus2, Building2, FolderOpen, GitMerge, LayoutDashboard, FlaskConical, Search, Zap, RotateCcw, FastForward, ChevronDown, ShieldCheck, ShieldAlert, UserCog, Clock3, Share2, FileText, Send, Inbox } from 'lucide-react'
-import { post, api, setRole, useApi, useRole } from './api'
-import { useToast } from './toast'
-import { ago, cx } from './ui'
+import { Bell, BarChart3, Building2, Check, ChevronDown, Clock3, Ellipsis, FilePlus2, FlaskConical, FolderOpen, GitMerge, House, Inbox, Newspaper, Search, Send, Share2, X } from 'lucide-react'
+import { post, setRole, useApi, useRole } from './api'
+import SearchBox from './components/SearchBox'
+import DemoDock from './components/DemoDock'
+import { BUREAU_COLORS, Logo, ago, cx } from './ui'
 
-const NAV = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
+type NavItem = { to: string; label: string; icon: any; end?: boolean; badge?: 'overlaps' | 'alerts' | 'unmatched'; hint?: string }
+
+const MAIN: NavItem[] = [
+  { to: '/', label: 'Home', icon: House, end: true },
   { to: '/cases', label: 'Cases', icon: FolderOpen },
-  { to: '/register', label: 'Register complaint', icon: FilePlus2 },
-  { to: '/unmatched', label: 'Review queue', icon: Inbox, badge: 'unmatched' },
-  { to: '/overlaps', label: 'Overlaps', icon: GitMerge, badge: 'overlaps' },
-  { to: '/galaxy', label: 'Connection Galaxy', icon: Share2 },
+  { to: '/register', label: 'Add complaint', icon: FilePlus2 },
+  { to: '/overlaps', label: 'Coordination', icon: GitMerge, badge: 'overlaps', hint: 'Cases that overlap' },
   { to: '/institutions', label: 'Institutions', icon: Building2 },
-  { to: '/briefings', label: 'Executive Briefing', icon: FileText },
+]
+const MORE: NavItem[] = [
+  { to: '/unmatched', label: 'Complaints to match', icon: Inbox, badge: 'unmatched' },
+  { to: '/alerts', label: 'All alerts', icon: Bell, badge: 'alerts' },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
-  { to: '/alerts', label: 'Alerts', icon: Bell, badge: 'alerts' },
-  { to: '/outbox', label: 'Outbox', icon: Send },
+  { to: '/galaxy', label: 'Connection map', icon: Share2 },
+  { to: '/briefings', label: 'Executive briefing', icon: Newspaper },
+  { to: '/outbox', label: 'Sent messages', icon: Send },
 ]
 
+const monogram = (role: string) => ({ SENIOR: 'SM', REGIONAL: 'RO' } as any)[role] || role.slice(0, 2)
+const store = {
+  get: (k: string) => { try { return localStorage.getItem(k) } catch { return null } },
+  set: (k: string, v: string) => { try { localStorage.setItem(k, v) } catch { /* private mode */ } },
+}
+
+function Badge({ n, tone }: { n: number; tone: 'overlaps' | 'alerts' | 'unmatched' }) {
+  if (!n) return null
+  return <span className={cx('rounded-full px-1.5 py-px font-mono text-[10.5px] font-semibold num', tone === 'overlaps' ? 'bg-red-600 text-white' : 'bg-navy text-white')}>{n}</span>
+}
 
 export default function Layout() {
   const nav = useNavigate()
   const loc = useLocation()
-  const { overlapToast, push } = useToast()
   const me = useRole()
   const meta = useApi<any>('/meta', false)
   const overlaps = useApi<any>('/overlaps')
   const alerts = useApi<any>('/alerts?limit=6')
   const unmatched = useApi<any>('/unmatched')
   const clock = useApi<any>('/clock')
-  const [q, setQ] = useState('')
-  const [busy, setBusy] = useState(false)
   const [bell, setBell] = useState(false)
-  const [demo, setDemo] = useState(false)
+  const [acct, setAcct] = useState(false)
+  const [sheet, setSheet] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(store.get('icmd.more') === '1')
+  const [demo, setDemo] = useState(store.get('icmd.demo') === '1')
   const bellRef = useRef<HTMLDivElement>(null)
-  const demoRef = useRef<HTMLDivElement>(null)
+  const acctRef = useRef<HTMLDivElement>(null)
+  const mainRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     const h = (e: MouseEvent) => {
       if (bellRef.current && !bellRef.current.contains(e.target as Node)) setBell(false)
-      if (demoRef.current && !demoRef.current.contains(e.target as Node)) setDemo(false)
+      if (acctRef.current && !acctRef.current.contains(e.target as Node)) setAcct(false)
+    }
+    const k = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setBell(false); setAcct(false); setSheet(false); setSearchOpen(false) }
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'd') toggleDemo()
     }
     document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
-  }, [])
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'd') setDemo((v) => !v) }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [])
+    window.addEventListener('keydown', k)
+    return () => { document.removeEventListener('mousedown', h); window.removeEventListener('keydown', k) }
+  })
+  useEffect(() => { mainRef.current?.scrollTo({ top: 0 }); setSheet(false) }, [loc.pathname])
 
-  const counts: Record<string, number> = {
+  function toggleDemo() { setDemo((v) => { store.set('icmd.demo', v ? '0' : '1'); return !v }) }
+  function toggleMore() { setMoreOpen((v) => { store.set('icmd.more', v ? '0' : '1'); return !v }) }
+
+  const counts = {
     overlaps: (overlaps.data?.items || []).filter((c: any) => c.status === 'OPEN').length,
     alerts: alerts.data?.unread || 0,
     unmatched: unmatched.data?.counts?.OPEN || 0,
   }
   const offset = clock.data?.offset_days || 0
-  const roleLabel = (meta.data?.roles || []).find((r: any) => r.code === me.role)?.label || me.role
+  const roles: any[] = meta.data?.roles || [{ code: 'SENIOR', label: 'Senior Management' }]
+  const roleLabel = roles.find((r) => r.code === me.role)?.label || me.role
+  const more = MORE.filter((n) => !(n.to === '/unmatched' && me.role === 'REGIONAL'))
+  const moreActive = more.some((n) => loc.pathname.startsWith(n.to))
+  const moreBadge = counts.alerts + counts.unmatched
 
-  async function simulate() {
-    setBusy(true); setDemo(false)
-    try {
-      const r = await post('/simulate/complaint')
-      if (r.overlaps?.length) r.overlaps.forEach((o: any) => overlapToast(o.pair_id))
-      else push({ kind: 'info', title: 'Complaint filed — no overlap found', body: <span className="text-slate-600">{r.case.case_id}</span> })
-    } finally { setBusy(false) }
-  }
-  async function timeMachine() {
-    setDemo(false)
-    const r = await post('/admin/clock', { add_days: 7 })
-    push({ kind: 'info', title: 'Time machine: +7 days', body: <span className="text-slate-600">Demo date is now {r.now.slice(0, 10)}. SLA engine has re-evaluated every case.</span> })
-  }
-  async function reset() {
-    setDemo(false)
-    await post('/admin/reset')
-    push({ kind: 'info', title: 'Demo reset', body: <span className="text-slate-600">Pristine seeded data restored.</span> })
-    nav('/')
-  }
-  async function verifyAll() {
-    setDemo(false)
-    const r = await api('/audit/verify')
-    r.ok
-      ? push({ kind: 'info', title: 'Audit trail intact', body: <span className="text-slate-600">{r.checked} records verified — hash chain unbroken.</span> })
-      : push({ kind: 'overlap', title: 'Tampering detected', body: <span className="text-slate-700">Record #{r.first_break.seq} of {r.first_break.case_id}: {r.first_break.reason}.</span>, to: `/cases/${r.first_break.case_id}`, cta: 'Open case' })
-  }
-  async function tamper() {
-    setDemo(false)
-    const m = loc.pathname.match(/^\/cases\/(.+)$/)
-    const r = await post('/admin/tamper', m ? { case_id: decodeURIComponent(m[1]), seq: 2 } : {})
-    push({ kind: 'warn', title: 'Demo: a record was altered', body: <span className="text-slate-600">Record #{r.seq} of {r.case_id} was changed directly in the database. Now run “Verify audit trail”.</span> })
-  }
-  async function restoreTamper() {
-    setDemo(false)
-    const r = await post('/admin/restore-tamper')
-    if (r.restored && r.verification?.ok) {
-      push({
-        kind: 'info',
-        title: 'Audit Vault Restored & Re-Verified',
-        body: <span className="text-slate-600">Tampered record restored to pristine state. {r.verification.checked} records mathematically verified.</span>
-      })
-    } else {
-      push({
-        kind: 'info',
-        title: 'Audit Vault Status',
-        body: <span className="text-slate-600">{r.message || `${r.verification?.checked} records verified.`}</span>
-      })
-    }
-  }
-
+  const link = (n: NavItem) => (
+    <NavLink key={n.to} to={n.to} end={n.end}
+      className={({ isActive }) => cx('group relative flex items-center gap-3 rounded-lg px-3 py-2 text-[14px] font-medium transition',
+        isActive ? 'bg-sheet text-slate-900 shadow-sm ring-1 ring-line' : 'text-slate-600 hover:bg-white/60 hover:text-slate-900')}>
+      {({ isActive }) => (<>
+        {isActive && <span className="absolute inset-y-2 left-0 w-[3px] rounded-r bg-saffron" />}
+        <n.icon size={18} strokeWidth={isActive ? 2.1 : 1.8} className={isActive ? 'text-navy-2' : 'text-slate-400 group-hover:text-slate-600'} />
+        <span className="flex-1">{n.label}</span>
+        {n.badge && <Badge n={counts[n.badge]} tone={n.badge} />}
+      </>)}
+    </NavLink>
+  )
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <aside className="hidden w-60 shrink-0 flex-col bg-navy text-slate-200 md:flex">
-        <div className="flex items-center gap-3 px-5 py-5">
-          <div className="grid h-9 w-9 place-items-center rounded-lg bg-white/10 ring-1 ring-white/15">
-            <ShieldCheck size={20} className="text-amber-400" />
+      <a href="#main" className="sr-only z-50 rounded bg-navy px-3 py-2 text-white focus:not-sr-only focus:absolute focus:left-3 focus:top-3">Skip to content</a>
+
+      {/* ---------------- sidebar ---------------- */}
+      <aside className="hidden w-[248px] shrink-0 flex-col border-r border-line bg-rail md:flex">
+        <button onClick={() => nav('/')} className="flex items-center gap-3 px-5 pb-4 pt-6 text-left">
+          <Logo size={38} />
+          <span className="leading-tight">
+            <span className="eyebrow block !text-[10px] !tracking-[.16em]">AICTE · ICMD</span>
+            <span className="font-display text-[1.125rem] font-semibold text-slate-900">Complaint Desk</span>
+          </span>
+        </button>
+
+        <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-2" aria-label="Main">
+          {MAIN.map(link)}
+          <div className="pt-4">
+            <button onClick={toggleMore} aria-expanded={moreOpen || moreActive}
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-slate-500 hover:text-slate-900">
+              <span className="eyebrow flex-1">More</span>
+              {!(moreOpen || moreActive) && <Badge n={moreBadge} tone="alerts" />}
+              <ChevronDown size={14} className={cx('transition', (moreOpen || moreActive) && 'rotate-180')} />
+            </button>
+            {(moreOpen || moreActive) && <div className="mt-0.5 space-y-0.5">{more.map(link)}</div>}
           </div>
-          <div className="leading-tight">
-            <div className="text-[15px] font-bold tracking-tight text-white">AICTE ICMD</div>
-            <div className="text-[10.5px] text-slate-300/80">Complaint Monitoring Dashboard</div>
-          </div>
-        </div>
-        <nav className="mt-2 flex-1 space-y-1 px-3">
-          {NAV.filter((n) => !(n.to === '/unmatched' && me.role === 'REGIONAL')).map((n) => (
-            <NavLink key={n.to} to={n.to} end={n.end}
-              className={({ isActive }) => cx('flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition',
-                isActive ? 'bg-white/12 text-white shadow-inner' : 'text-slate-300 hover:bg-white/6 hover:text-white')}>
-              <n.icon size={18} />
-              <span className="flex-1">{n.label}</span>
-              {n.badge && counts[n.badge] > 0 && (
-                <span className={cx('rounded-full px-1.5 py-0.5 text-[10.5px] font-bold num',
-                  n.badge === 'overlaps' ? 'bg-red-500 text-white' : 'bg-amber-400 text-navy')}>{counts[n.badge]}</span>)}
-            </NavLink>
-          ))}
         </nav>
-        <div className="m-3 rounded-lg bg-white/6 p-3 text-[11px] leading-relaxed text-slate-300 ring-1 ring-white/10">
-          <div className="mb-1 flex items-center gap-1.5 font-semibold text-amber-300"><FlaskConical size={13} /> Prototype</div>
-          Synthetic data. All institutions are fictional. Runs fully offline.
+
+        <div className="m-3 rounded-lg border border-dashed border-slate-300 p-3 text-[11.5px] leading-relaxed text-slate-500">
+          <div className="mb-0.5 flex items-center gap-1.5 font-semibold text-slate-600"><FlaskConical size={12} /> Prototype</div>
+          Synthetic data. Every institution here is fictional. Works fully offline.
         </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-5 py-3">
-          <form className="relative max-w-md flex-1" onSubmit={(e) => { e.preventDefault(); const t = q.trim(); nav(t.split(/\s+/).length >= 3 && !/^[\w/-]+$/.test(t) ? `/cases?nl=${encodeURIComponent(t)}` : `/cases?q=${encodeURIComponent(t)}`) }}>
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input value={q} onChange={(e) => setQ(e.target.value)}
-              placeholder="Search, or ask: pending RB cases in Western region older than 30 days"
-              className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none focus:border-navy-2 focus:bg-white focus:ring-2 focus:ring-navy-2/15" />
-          </form>
-          <div className="ml-auto flex items-center gap-2">
+        {/* ---------------- top bar ---------------- */}
+        <header className="relative z-20 flex items-center gap-3 border-b border-line bg-paper/85 px-4 py-3 backdrop-blur md:px-8">
+          <button onClick={() => nav('/')} className="md:hidden" aria-label="Home"><Logo size={32} /></button>
+          <SearchBox className="hidden max-w-xl flex-1 md:block" />
+          <div className="flex-1 md:hidden" />
+          <button onClick={() => setSearchOpen(true)} aria-label="Search" className="rounded-full p-2 text-slate-600 hover:bg-slate-200/60 md:hidden"><Search size={20} /></button>
+
+          <div className="ml-auto flex items-center gap-1.5 md:gap-2.5">
             {offset > 0 && (
-              <span title="Demo clock is advanced. Use Demo > Reset to return." className="flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-200">
-                <Clock3 size={13} /> Demo date +{offset}d
+              <span title="The demo clock has been moved forward" className="hidden items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 sm:flex">
+                <Clock3 size={13} /> +{offset} days
               </span>)}
 
-            <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 pl-2.5">
-              <UserCog size={15} className="text-slate-400" />
-              <select value={me.role} onChange={(e) => setRole({ role: e.target.value, region: e.target.value === 'REGIONAL' ? (me.region || 'Western') : '' })}
-                title="Viewing as (prototype role switcher)"
-                className="max-w-[150px] cursor-pointer bg-transparent py-2 pr-1.5 text-sm font-medium text-slate-700 outline-none">
-                {(meta.data?.roles || [{ code: 'SENIOR', label: 'Senior Management' }]).map((r: any) => <option key={r.code} value={r.code}>{r.label}</option>)}
-              </select>
-              {me.role === 'REGIONAL' && (
-                <select value={me.region} onChange={(e) => setRole({ role: 'REGIONAL', region: e.target.value })}
-                  className="cursor-pointer border-l border-slate-200 bg-transparent py-2 pl-2 pr-1.5 text-sm font-medium text-slate-700 outline-none">
-                  {(meta.data?.regions || []).map((r: any) => <option key={r.name} value={r.name}>{r.name}</option>)}
-                </select>)}
-            </div>
-
-            <button onClick={simulate} disabled={busy}
-              className="flex items-center gap-2 rounded-lg bg-saffron px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:brightness-95 disabled:opacity-60">
-              <Zap size={16} className={busy ? 'animate-pulse' : ''} /> <span className="hidden lg:inline">Simulate New Complaint</span><span className="lg:hidden">Simulate</span>
-            </button>
-
             <div className="relative" ref={bellRef}>
-              <button onClick={() => setBell((v) => !v)} className="relative rounded-lg p-2 text-slate-600 hover:bg-slate-100">
+              <button onClick={() => { setBell((v) => !v); setAcct(false) }} aria-label={`Alerts${counts.alerts ? `, ${counts.alerts} unread` : ''}`}
+                className="relative rounded-full p-2 text-slate-600 transition hover:bg-slate-200/60">
                 <Bell size={20} />
-                {counts.alerts > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-4.5 min-w-4.5 place-items-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white num">{counts.alerts}</span>}
+                {counts.alerts > 0 && <span className="absolute right-0 top-0 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-red-600 px-1 font-mono text-[10px] font-semibold text-white ring-2 ring-paper num">{counts.alerts}</span>}
               </button>
               {bell && (
-                <div className="toast-in absolute right-0 top-11 z-30 w-[380px] overflow-hidden rounded-xl bg-white shadow-xl ring-1 ring-slate-200">
-                  <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5">
-                    <span className="text-sm font-semibold">Alerts</span>
-                    <button className="text-xs font-medium text-navy-2 hover:underline" onClick={() => { setBell(false); nav('/alerts') }}>View all</button>
+                <div className="toast-in absolute right-0 top-12 z-30 w-[min(400px,92vw)] overflow-hidden rounded-xl border border-line bg-sheet shadow-xl">
+                  <div className="flex items-center justify-between border-b border-line px-4 py-3">
+                    <span className="font-display text-base font-semibold">Alerts for you</span>
+                    <span className="flex gap-3 text-xs font-semibold">
+                      {counts.alerts > 0 && <button className="text-slate-500 hover:text-slate-900" onClick={async () => { await post('/alerts/read-all'); alerts.reload() }}>Mark all read</button>}
+                      <button className="text-navy-2 hover:underline" onClick={() => { setBell(false); nav('/alerts') }}>See all</button>
+                    </span>
                   </div>
-                  <ul className="max-h-96 divide-y divide-slate-100 overflow-auto">
+                  <ul className="max-h-[26rem] divide-y divide-line overflow-auto">
                     {(alerts.data?.items || []).map((a: any) => (
                       <li key={a.id}>
                         <button className="flex w-full gap-3 px-4 py-3 text-left hover:bg-slate-50"
                           onClick={() => { setBell(false); post(`/alerts/${a.id}/read`).then(alerts.reload); nav(a.link) }}>
-                          <span className={cx('mt-1 h-2 w-2 shrink-0 rounded-full', a.severity === 'HIGH' ? 'bg-red-500' : 'bg-amber-500', a.read && 'opacity-30')} />
+                          <span className={cx('mt-1.5 h-2 w-2 shrink-0 rounded-full', a.severity === 'HIGH' ? 'bg-red-500' : 'bg-amber-500', a.read && 'opacity-25')} />
                           <span className="min-w-0 flex-1">
-                            <span className={cx('block text-[13px] leading-snug', a.read ? 'text-slate-500' : 'font-semibold text-slate-800')}>{a.message}</span>
+                            <span className={cx('block text-[13.5px] leading-snug', a.read ? 'text-slate-500' : 'font-semibold text-slate-900')}>{a.message}</span>
                             <span className="mt-0.5 block truncate text-xs text-slate-500">{a.institution_name || a.case_id || ''}</span>
                             <span className="text-[11px] text-slate-400">{ago(a.created_at)}</span>
                           </span>
                         </button>
                       </li>))}
-                    {(alerts.data?.items || []).length === 0 && <li className="p-6 text-center text-sm text-slate-400">No alerts.</li>}
+                    {(alerts.data?.items || []).length === 0 && <li className="p-8 text-center text-sm text-slate-400">You are all caught up.</li>}
                   </ul>
                 </div>)}
             </div>
 
-            <div className="relative" ref={demoRef}>
-              <button onClick={() => setDemo((v) => !v)}
-                className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
-                Demo <ChevronDown size={14} />
+            <div className="relative" ref={acctRef}>
+              <button onClick={() => { setAcct((v) => !v); setBell(false) }} aria-expanded={acct}
+                className="flex items-center gap-2 rounded-full border border-line bg-sheet py-1 pl-1 pr-2.5 shadow-sm transition hover:border-slate-300 md:pr-3">
+                <span className="grid h-7 w-7 place-items-center rounded-full font-mono text-[11px] font-semibold text-white" style={{ background: BUREAU_COLORS[me.role] || '#1b2547' }}>{monogram(me.role)}</span>
+                <span className="hidden text-left leading-tight md:block">
+                  <span className="block text-[11px] text-slate-500">Viewing as</span>
+                  <span className="block max-w-[150px] truncate text-[13px] font-semibold text-slate-800">{roleLabel}{me.role === 'REGIONAL' && me.region ? ` · ${me.region}` : ''}</span>
+                </span>
+                <ChevronDown size={14} className="text-slate-400" />
               </button>
-              {demo && (
-                <div className="toast-in absolute right-0 top-11 z-30 w-64 rounded-xl bg-white p-1.5 shadow-xl ring-1 ring-slate-200">
-                  <button onClick={simulate} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-slate-50"><Zap size={15} className="text-saffron" /> Simulate new complaint</button>
-                  <button onClick={timeMachine} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-slate-50"><FastForward size={15} className="text-blue-600" /> Time machine: +7 days</button>
-                  <div className="my-1 border-t border-slate-100" />
-                  <button onClick={verifyAll} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-slate-50"><ShieldCheck size={15} className="text-emerald-600" /> Verify audit trail</button>
-                  <button onClick={tamper} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-slate-50"><ShieldAlert size={15} className="text-red-600" /> Tamper with a record</button>
-                  <button onClick={restoreTamper} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-slate-50"><RotateCcw size={15} className="text-emerald-600" /> Restore &amp; re-verify</button>
-                  <div className="my-1 border-t border-slate-100" />
-                  <button onClick={reset} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-slate-50"><RotateCcw size={15} className="text-slate-500" /> Reset demo data</button>
-
-                  <div className="px-3 pb-1.5 pt-1 text-[11px] text-slate-400">Shortcut: Ctrl+Shift+D · Viewing as {roleLabel}</div>
+              {acct && (
+                <div className="toast-in absolute right-0 top-12 z-30 w-[min(320px,92vw)] overflow-hidden rounded-xl border border-line bg-sheet shadow-xl">
+                  <div className="border-b border-line bg-slate-100/60 px-4 py-3">
+                    <div className="eyebrow">Who are you in this demo?</div>
+                    <p className="mt-1 text-xs leading-snug text-slate-500">There is no login in the prototype. Pick a role to see the app exactly as that person would.</p>
+                  </div>
+                  <ul className="max-h-[50vh] overflow-auto p-1.5">
+                    {roles.map((r: any) => (
+                      <li key={r.code}>
+                        <button onClick={() => { setRole({ role: r.code, region: r.code === 'REGIONAL' ? (me.region || 'Western') : '' }); if (r.code !== 'REGIONAL') setAcct(false) }}
+                          className={cx('flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-slate-100', me.role === r.code && 'bg-slate-100')}>
+                          <span className="grid h-7 w-7 place-items-center rounded-full font-mono text-[11px] font-semibold text-white" style={{ background: BUREAU_COLORS[r.code] || '#1b2547' }}>{monogram(r.code)}</span>
+                          <span className="flex-1 font-medium text-slate-800">{r.label}</span>
+                          {me.role === r.code && <Check size={16} className="text-emerald-600" />}
+                        </button>
+                      </li>))}
+                  </ul>
+                  {me.role === 'REGIONAL' && (
+                    <label className="block border-t border-line px-4 py-3 text-sm">
+                      <span className="eyebrow mb-1 block">Region</span>
+                      <select value={me.region} onChange={(e) => setRole({ role: 'REGIONAL', region: e.target.value })} className="field">
+                        {(meta.data?.regions || []).map((r: any) => <option key={r.name} value={r.name}>{r.name}</option>)}
+                      </select>
+                    </label>)}
+                  <button onClick={toggleDemo} role="switch" aria-checked={demo}
+                    className="flex w-full items-center gap-3 border-t border-line px-4 py-3 text-left hover:bg-slate-50">
+                    <span className="flex-1">
+                      <span className="block text-sm font-semibold text-slate-800">Demo mode</span>
+                      <span className="block text-xs text-slate-500">Show presenter controls (new complaint, time jump, reset)</span>
+                    </span>
+                    <span className={cx('relative h-5 w-9 rounded-full transition', demo ? 'bg-emerald-600' : 'bg-slate-300')}>
+                      <span className={cx('absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all', demo ? 'left-[18px]' : 'left-0.5')} />
+                    </span>
+                  </button>
                 </div>)}
             </div>
           </div>
         </header>
-        <main className="flex-1 overflow-auto p-6"><Outlet /></main>
+
+        {/* mobile full-screen search */}
+        {searchOpen && (
+          <div className="fixed inset-0 z-50 bg-paper p-4 md:hidden">
+            <div className="flex items-center gap-2">
+              <SearchBox className="flex-1" autoFocus onDone={() => setSearchOpen(false)} />
+              <button onClick={() => setSearchOpen(false)} className="rounded-full p-2 text-slate-600" aria-label="Close search"><X size={20} /></button>
+            </div>
+          </div>)}
+
+        <main id="main" ref={mainRef} className="flex-1 overflow-auto px-4 pb-28 pt-6 md:px-8 md:pb-12 md:pt-8">
+          <div key={loc.pathname}><Outlet /></div>
+        </main>
+
+        {/* ---------------- mobile bottom bar ---------------- */}
+        <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 items-end border-t border-line bg-sheet/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
+          {[MAIN[0], MAIN[1], MAIN[2], MAIN[3]].map((n) => (
+            <NavLink key={n.to} to={n.to} end={n.end}
+              className={({ isActive }) => cx('relative flex flex-col items-center gap-0.5 py-2 text-[11px] font-semibold', isActive ? 'text-navy-2' : 'text-slate-500', n.to === '/register' && '-mt-4')}>
+              {({ isActive }) => (<>
+                {n.to === '/register'
+                  ? <span className="grid h-12 w-12 place-items-center rounded-full bg-saffron text-white shadow-lg ring-4 ring-sheet"><n.icon size={22} /></span>
+                  : <n.icon size={21} strokeWidth={isActive ? 2.2 : 1.8} />}
+                <span>{n.to === '/register' ? 'Add' : n.label}</span>
+                {n.badge && counts[n.badge] > 0 && <span className="absolute right-[22%] top-1 rounded-full bg-red-600 px-1 font-mono text-[9px] font-semibold text-white">{counts[n.badge]}</span>}
+              </>)}
+            </NavLink>))}
+          <button onClick={() => setSheet(true)} className="relative flex flex-col items-center gap-0.5 py-2 text-[11px] font-semibold text-slate-500">
+            <Ellipsis size={21} /><span>More</span>
+            {moreBadge > 0 && <span className="absolute right-[22%] top-1 rounded-full bg-navy px-1 font-mono text-[9px] font-semibold text-white">{moreBadge}</span>}
+          </button>
+        </nav>
+
+        {sheet && (
+          <div className="fixed inset-0 z-50 flex items-end md:hidden" role="dialog" aria-modal="true">
+            <div className="absolute inset-0 bg-slate-950/45" onClick={() => setSheet(false)} />
+            <div className="toast-in relative w-full rounded-t-2xl border-t border-line bg-sheet p-4 pb-8 shadow-xl">
+              <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-300" />
+              <ul className="grid grid-cols-2 gap-2">
+                {[MAIN[4], ...more].map((n) => (
+                  <li key={n.to}>
+                    <NavLink to={n.to} className="flex items-center gap-3 rounded-lg border border-line bg-white px-3 py-3 text-sm font-semibold text-slate-800">
+                      <n.icon size={18} className="text-slate-500" /><span className="flex-1">{n.label}</span>{n.badge && <Badge n={counts[n.badge]} tone={n.badge} />}
+                    </NavLink>
+                  </li>))}
+              </ul>
+            </div>
+          </div>)}
       </div>
+
+      {demo && <DemoDock offset={offset} onClose={toggleDemo} />}
     </div>
   )
 }

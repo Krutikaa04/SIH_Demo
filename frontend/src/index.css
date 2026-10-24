@@ -1,20 +1,153 @@
 @import "tailwindcss";
-@import "@fontsource-variable/inter";
+@import "@fontsource-variable/public-sans";
+@import "@fontsource-variable/newsreader";
+@import "@fontsource-variable/newsreader/wght-italic.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
 
+/*
+  Design language: "the case file".
+  Warm paper, ink-blue type, one vermilion for what is urgent. Serif for headlines and big figures,
+  a clean humanist sans for everything you read, monospace for case numbers. Every palette below
+  replaces the stock Tailwind scale, so existing utility classes (slate-*, red-*, blue-* ...) pick it up.
+*/
 @theme {
-  --font-sans: "Inter Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --color-navy: #0b2a4a;
-  --color-navy-2: #12365f;
-  --color-saffron: #e8830c;
+  --font-sans: "Public Sans Variable", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Newsreader Variable", "Iowan Old Style", Georgia, serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  --color-paper: #f4f0e6;
+  --color-sheet: #fdfbf6;
+  --color-rail: #ece6d7;
+  --color-line: #e3dccb;
+  --color-ink: #1b2130;
+  --color-navy: #1b2547;
+  --color-navy-2: #2d3d73;
+  --color-saffron: #d4601c;
+  --color-vermilion: #c0391b;
+
+  /* warm ink greys */
+  --color-slate-50: #f9f7f1;
+  --color-slate-100: #f2eee4;
+  --color-slate-200: #e5dfd0;
+  --color-slate-300: #d1c9b6;
+  --color-slate-400: #a29c8b;
+  --color-slate-500: #77736a;
+  --color-slate-600: #5a5951;
+  --color-slate-700: #41424a;
+  --color-slate-800: #2a2f3e;
+  --color-slate-900: #1b2130;
+  --color-slate-950: #111521;
+
+  /* vermilion: overdue, conflict, danger */
+  --color-red-50: #fdf1ec; --color-red-100: #fadcd1; --color-red-200: #f3b9a5; --color-red-300: #ea917a;
+  --color-red-400: #dd694b; --color-red-500: #cc4a2b; --color-red-600: #b93b1f; --color-red-700: #962f19;
+  --color-red-800: #6f2415; --color-red-900: #4a190f; --color-red-950: #2c0e08;
+
+  /* saffron / marigold: attention */
+  --color-orange-50: #fef5e7; --color-orange-100: #fce5c2; --color-orange-200: #f8cb87; --color-orange-300: #f2ad4c;
+  --color-orange-400: #e9922a; --color-orange-500: #d67a17; --color-orange-600: #b76011; --color-orange-700: #924a10;
+  --color-orange-800: #6a380f; --color-orange-900: #46250b;
+  --color-amber-50: #fdf8e3; --color-amber-100: #faedb8; --color-amber-200: #f3dc7d; --color-amber-300: #e9c640;
+  --color-amber-400: #d9ad1c; --color-amber-500: #bf9210; --color-amber-600: #9c750e; --color-amber-700: #785a0e;
+  --color-amber-800: #57420d; --color-amber-900: #3a2c09;
+
+  /* deep green: done, healthy */
+  --color-emerald-50: #edf6f0; --color-emerald-100: #d3e9db; --color-emerald-200: #a7d3b7; --color-emerald-300: #77b794;
+  --color-emerald-400: #48996f; --color-emerald-500: #2c7f59; --color-emerald-600: #236948; --color-emerald-700: #1c5539;
+  --color-emerald-800: #164029; --color-emerald-900: #102c1d;
+  --color-green-50: #edf6f0; --color-green-100: #d3e9db; --color-green-200: #a7d3b7; --color-green-300: #77b794;
+  --color-green-400: #48996f; --color-green-500: #2c7f59; --color-green-600: #236948; --color-green-700: #1c5539;
+  --color-green-800: #164029; --color-green-900: #102c1d;
+
+  /* ink blue: information, links, in progress */
+  --color-blue-50: #eef1f9; --color-blue-100: #dce3f3; --color-blue-200: #bcc9e8; --color-blue-300: #93a6d7;
+  --color-blue-400: #6881c1; --color-blue-500: #4763a9; --color-blue-600: #364f8f; --color-blue-700: #2b4173;
+  --color-blue-800: #212f55; --color-blue-900: #182140;
+
+  /* plum: coordination, linked, manual */
+  --color-indigo-50: #f4f0f9; --color-indigo-100: #e6dff2; --color-indigo-200: #cdbde4; --color-indigo-300: #ad96d1;
+  --color-indigo-400: #8b6bb9; --color-indigo-500: #70509e; --color-indigo-600: #5b4085; --color-indigo-700: #483269;
+  --color-indigo-800: #352451; --color-indigo-900: #241839;
+  --color-violet-50: #f4f0f9; --color-violet-100: #e6dff2; --color-violet-200: #cdbde4; --color-violet-300: #ad96d1;
+  --color-violet-400: #8b6bb9; --color-violet-500: #70509e; --color-violet-600: #5b4085; --color-violet-700: #483269;
+  --color-violet-800: #352451; --color-violet-900: #241839;
+
+  /* teal: transferred, neutral information */
+  --color-sky-50: #ebf5f6; --color-sky-100: #d2e8eb; --color-sky-200: #a5d0d6; --color-sky-300: #72b3bd;
+  --color-sky-400: #4195a2; --color-sky-500: #267a88; --color-sky-600: #1d6371; --color-sky-700: #174e5a;
+  --color-sky-800: #123c44; --color-sky-900: #0d292f;
+  --color-teal-50: #ebf5f6; --color-teal-100: #d2e8eb; --color-teal-200: #a5d0d6; --color-teal-300: #72b3bd;
+  --color-teal-400: #4195a2; --color-teal-500: #267a88; --color-teal-600: #1d6371; --color-teal-700: #174e5a;
+  --color-teal-800: #123c44; --color-teal-900: #0d292f;
+
+  /* crisper corners, flatter warm shadows */
+  --radius-md: 0.3125rem;
+  --radius-lg: 0.4375rem;
+  --radius-xl: 0.625rem;
+  --radius-2xl: 0.875rem;
+  --shadow-sm: 0 1px 0 rgb(60 45 10 / 0.04), 0 1px 2px rgb(60 45 10 / 0.06);
+  --shadow-md: 0 1px 0 rgb(60 45 10 / 0.04), 0 4px 14px -4px rgb(60 45 10 / 0.14);
+  --shadow-lg: 0 2px 0 rgb(60 45 10 / 0.03), 0 14px 32px -10px rgb(60 45 10 / 0.22);
+  --shadow-xl: 0 24px 60px -16px rgb(30 25 10 / 0.35);
 }
 
 html, body, #root { height: 100%; }
-body { background: #f3f5f9; color: #0f172a; font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; border: 2px solid #f3f5f9; }
+html { scroll-behavior: smooth; }
+body {
+  background-color: var(--color-paper);
+  /* a whisper of paper grain; invisible as a pattern, felt as warmth */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .35  0 0 0 0 .28  0 0 0 0 .12  0 0 0 .055 0'/></filter><rect width='160' height='160' filter='url(%23n)'/></svg>");
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+::selection { background: #f2d8a4; color: var(--color-ink); }
+:focus-visible { outline: 2px solid var(--color-navy-2); outline-offset: 2px; border-radius: 4px; }
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offset: 0; }
+
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-thumb { background: #cfc6b0; border-radius: 8px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: #b9ae93; background-clip: padding-box; border: 3px solid transparent; }
 
 @keyframes slidein { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
-@keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(220,38,38,.45); } 100% { box-shadow: 0 0 0 12px rgba(220,38,38,0); } }
-.toast-in { animation: slidein .28s ease-out; }
-.pulse-red { animation: pulse-ring 1.6s infinite; }
+@keyframes rise { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(192,57,27,.4); } 100% { box-shadow: 0 0 0 12px rgba(192,57,27,0); } }
+.toast-in { animation: slidein .28s cubic-bezier(.2,.8,.2,1); }
+.rise { animation: rise .45s cubic-bezier(.2,.8,.2,1) both; }
+.rise-1 { animation-delay: .04s; } .rise-2 { animation-delay: .08s; } .rise-3 { animation-delay: .12s; } .rise-4 { animation-delay: .16s; }
+.pulse-red { animation: pulse-ring 1.8s infinite; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}
+
 .num { font-variant-numeric: tabular-nums; }
+.font-display { font-optical-sizing: auto; letter-spacing: -0.012em; }
+
+/* ----- shared building blocks ----- */
+.eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--color-slate-500); }
+.case-id { font-family: var(--font-mono); font-weight: 600; font-size: .8125rem; letter-spacing: -.01em; }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; border-radius: var(--radius-lg); padding: .55rem 1rem;
+  font-size: .875rem; font-weight: 600; line-height: 1.2; transition: background .15s, box-shadow .15s, transform .08s, border-color .15s; cursor: pointer; white-space: nowrap; }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-primary { background: var(--color-navy); color: #fff; box-shadow: 0 1px 0 rgb(255 255 255 / .12) inset, 0 1px 2px rgb(20 25 60 / .35); }
+.btn-primary:hover:not(:disabled) { background: var(--color-navy-2); }
+.btn-accent { background: var(--color-saffron); color: #fff; box-shadow: 0 1px 0 rgb(255 255 255 / .2) inset, 0 1px 2px rgb(110 50 10 / .35); }
+.btn-accent:hover:not(:disabled) { filter: brightness(1.06); }
+.btn-ghost { background: var(--color-sheet); color: var(--color-slate-800); border: 1px solid var(--color-line); }
+.btn-ghost:hover:not(:disabled) { background: #fff; border-color: var(--color-slate-300); }
+.btn-danger { background: var(--color-red-600); color: #fff; }
+.btn-danger:hover:not(:disabled) { background: var(--color-red-700); }
+.btn-sm { padding: .35rem .7rem; font-size: .8125rem; }
+
+.field { width: 100%; border-radius: var(--radius-lg); border: 1px solid var(--color-slate-300); background: #fff; padding: .55rem .75rem; font-size: .9rem; color: var(--color-ink); transition: border-color .15s, box-shadow .15s; }
+.field::placeholder { color: var(--color-slate-400); }
+.field:hover { border-color: var(--color-slate-400); }
+.field:focus { outline: none; border-color: var(--color-navy-2); box-shadow: 0 0 0 3px rgb(45 61 115 / .16); }
+select.field { appearance: none; padding-right: 2rem; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1.5l5 5 5-5' fill='none' stroke='%2377736a' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>"); background-repeat: no-repeat; background-position: right .8rem center; }

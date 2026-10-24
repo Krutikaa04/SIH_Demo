@@ -34,9 +34,9 @@ Run the backend in another terminal with `python run.py --no-browser`.
 - Explainable overlap engine (identity, fuzzy name, TF-IDF text, category, time window) with a "Why flagged" breakdown
 - Coordination Room: link cases (detected or manual), add/remove cases, pick lead Bureau, comment, record decision
 - Dashboard with KPIs, charts, ageing, trend, risk-ranked institutions and live activity
-- **Simulate New Complaint** button: files a scripted complaint through the real pipeline and fires a live alert
+- **Demo mode** (role menu, top right, or Ctrl+Shift+D) shows presenter controls: *File a new complaint* runs a scripted complaint through the real pipeline and fires a live alert
 - **SLA engine & Simulated Outbox**: countdown timers, 75% warnings, auto-escalation at 100% (Deputy Director) and 150% (Director),
-  ping-pong transfer alerts, daily pending-reminder digests, and simulated email/SMS reminder dispatch with dedicated Outbox archive. Demo > "Time machine: +7 days" triggers it live
+  ping-pong transfer alerts, daily pending-reminder digests, and simulated email/SMS reminder dispatch with dedicated Outbox archive. Demo tools > "Jump 7 days ahead" triggers it live
 - **Case workflow**: remark, assign, transfer, escalate, dispose; every action is hash-chained, with
   "Verify integrity" and a demo "Tamper with a record" button
 - **Institution risk score** (volume + severity + repeat offences + overdue), colour-coded, with breakdown

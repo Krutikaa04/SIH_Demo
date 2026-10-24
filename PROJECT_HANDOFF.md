@@ -323,11 +323,15 @@ Interactive docs: `http://127.0.0.1:8000/docs` (FastAPI Swagger) while the app r
 
 ## 10. Frontend guide
 
-- **Routes** (`main.tsx`): `/` Dashboard · `/cases` · `/cases/<case-id…>` (splat route because IDs have slashes) · `/overlaps` (`?open=OVL-xxxx` opens the Why-flagged drawer) · `/rooms/:id` · `/institutions` · `/institutions/:id` · `/reports` · `/alerts` · `/register` (Register complaint: single form + bulk CSV).
-- **Data fetching:** `useApi(path)` (in `api.ts`) fetches and **auto-refreshes on SSE events and on role change**. It sets `data=null` on error so 403/404 show an `ErrorBox`. Use `post()`/`api()` for writes; `download()` for files (it sends the role headers; a plain `<a href>` can't).
-- **Role:** `useRole()` / `setRole()` (persisted in `localStorage`). The header dropdown calls `setRole`; every `api()` call adds the headers. UI greys out actions using the `allowed_actions` the server returns — **the server is the source of truth**.
-- **Shared UI** (`ui.tsx`): `BureauBadge`, `StatusChip`, `SlaChip`, `RiskBadge`, `ScoreRing`, `Card`, `Drawer`, `Countdown` (live SLA timer using server clock), formatters.
-- **Conventions:** Tailwind utility classes; theme tokens in `index.css` (`navy`, `navy-2`, `saffron`); status/bureau colours live in `ui.tsx`. TypeScript is intentionally loose (`any` is common) — tighten if you add shared types.
+- **Design language: "the case file".** Warm paper background, ink-blue type, one vermilion for what is urgent. Serif (**Newsreader**) for headlines and big figures, **Public Sans** for reading, **IBM Plex Mono** for case numbers. Fonts are self-hosted through `@fontsource*`, so the app stays fully offline. All colour tokens live in `index.css` and **replace Tailwind's stock scales** (`slate`, `red`, `blue`, `emerald`, `indigo`, `sky`, `orange`, `amber`), so existing utilities such as `bg-red-50` automatically pick up the palette; use `.btn .btn-primary|accent|ghost|danger`, `.field`, `.eyebrow`, `.case-id` for the common pieces.
+- **Layout** (`Layout.tsx`): five main nav items (Home, Cases, Add complaint, Coordination, Institutions) plus a collapsible **More** group (Complaints to match, All alerts, Reports, Connection map, Executive briefing, Sent messages); a bottom tab bar replaces the sidebar below 768 px. The top bar has one **search box** (`components/SearchBox.tsx`: case numbers, institutions, plain-English questions; press `/`), the alert bell and the **role chip** (the old role dropdown). **Demo mode** (a switch in the role menu, or Ctrl+Shift+D) shows `components/DemoDock.tsx` with the presenter controls (new complaint, time jump, audit verify/tamper/restore, reset); it is off by default.
+- **Home** (`pages/Dashboard.tsx`): Bureau officers get a to-do list (overdue / coordinate / due soon) built from `/cases` filters, with the organisation-wide charts folded under "The wider picture"; Senior and Regional get "Today at a glance" with the briefing, four headline figures and the full `components/Analytics.tsx`.
+- **Routes** (`main.tsx`): `/` · `/cases` (for a Bureau officer plain `/cases` starts on their own Bureau) · `/cases/<case-id…>` (splat route because IDs have slashes) · `/overlaps` (`?open=OVL-xxxx` opens the Why-flagged drawer) · `/rooms/:id` · `/institutions` · `/institutions/:id` · `/reports` · `/alerts` · `/register` · `/unmatched` · `/galaxy` · `/briefings` · `/outbox`.
+- **Data fetching:** `useApi(path)` (in `api.ts`) fetches and **auto-refreshes on SSE events and on role change**. It sets `data=null` on error so 403/404 show an `ErrorBox`. Use `post()`/`api()` for writes; `download()` for files.
+- **Role:** `useRole()` / `setRole()` (persisted in `localStorage`). Every `api()` call adds the headers. The UI greys out actions using the `allowed_actions` the server returns — the server stays the authority.
+- **Shared UI** (`ui.tsx`): `PageHeader`, `Card`, `Stat`, `Segmented`, `EmptyState`, `Drawer`, `Logo`, `BureauBadge`, `StatusChip`, `SlaChip` / `dueText`, `RiskBadge`, `ScoreRing`, `Countdown` (live SLA timer using server clock), formatters.
+- **Wording rule:** plain words for officers ("Past due date", "Cases that overlap", "Complaints to match", "Add a note", "Send to another Bureau"). The problem statement's own phrase **"Potential Overlapping Cases — Coordination Required"** is kept word for word everywhere the alert appears. The API, tests and field names are unchanged.
+- **Conventions:** TypeScript is intentionally loose (`any` is common) — tighten if you add tests. Mobile: check any new page at 375 px.
 - **Gotcha:** after editing the frontend, run `npm run build`, then hard-refresh the browser (the server sends `Cache-Control: no-cache` for `index.html`, but an open tab keeps its old bundle).
 
 ---
@@ -369,7 +373,7 @@ Interactive docs: `http://127.0.0.1:8000/docs` (FastAPI Swagger) while the app r
 - **Heatmap is region-level** (no district drill-down). Region names (8) should be verified against AICTE's real regional-office structure.
 - **K4 case-network graph** not built.
 - **Scale:** SQLite, single process, in-memory TF-IDF refit per detection run — fine for hundreds of cases; production needs PostgreSQL, a worker queue, and incremental indexing.
-- **UI:** desktop-first; sidebar hidden on narrow screens; TypeScript loosely typed; no automated frontend tests.
+- **UI:** responsive (bottom tab bar on phones); TypeScript loosely typed; no automated frontend tests. The Connection map's node layout is crowded with many cases (backlog).
 
 ---
 

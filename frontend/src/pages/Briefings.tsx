@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { FileText, Printer, Building2, ShieldAlert, Users, ArrowUpRight, CheckCircle2 } from 'lucide-react'
 import { useApi } from '../api'
-import { Card, Loading, ErrorBox, cx } from '../ui'
+import { Card, Loading, ErrorBox, PageHeader, cx } from '../ui'
 
 export default function Briefings() {
   const nav = useNavigate()
@@ -33,22 +33,10 @@ export default function Briefings() {
 
   return (
     <div className="mx-auto max-w-[1000px] space-y-5 print:m-0 print:p-0">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4 print:hidden">
-        <div className="flex items-center gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-navy text-white shadow-sm">
-            <FileText size={20} />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold tracking-tight text-slate-900">Executive Briefing &amp; Citations</h1>
-            <p className="text-xs text-slate-500">Synthesized multi-bureau intelligence grounded in verified dockets</p>
-          </div>
-        </div>
-        <button
-          onClick={() => window.print()}
-          className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
-          <Printer size={16} /> Print Official Brief
-        </button>
+      <div className="print:hidden">
+        <PageHeader eyebrow="For the leadership" title="Executive briefing"
+          subtitle="Where the complaints stand, in plain words. Every figure is worked out from real cases, and the highlighted case numbers open the evidence."
+          actions={<button onClick={() => window.print()} className="btn btn-ghost"><Printer size={16} /> Print this briefing</button>} />
       </div>
 
       {loading && !briefing ? (
@@ -57,54 +45,32 @@ export default function Briefings() {
         <ErrorBox msg={error} />
       ) : (
         <div className="space-y-5">
-          {/* Executive Overview Banner */}
-          <div className="rounded-xl border border-slate-200 bg-gradient-to-r from-slate-900 to-navy p-5 text-white shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-3">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400">
-                Official Directorate Briefing
-              </span>
-              <span className="text-xs text-slate-300 font-medium">
-                Anchor Date: {briefing.generated_at}
-              </span>
+          {/* Overview */}
+          <div className="rise rounded-xl bg-navy p-6 text-paper shadow-md">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/15 pb-3">
+              <span className="text-[11px] font-bold uppercase tracking-[.14em] text-amber-300">Official briefing</span>
+              <span className="text-xs text-paper/70">As of {briefing.generated_at}</span>
             </div>
-            <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <div>
-                <div className="text-[11px] text-slate-400">Total Grievances</div>
-                <div className="num mt-0.5 text-2xl font-bold">{briefing.total_cases}</div>
-              </div>
-              <div>
-                <div className="text-[11px] text-slate-400">Active / Pending</div>
-                <div className="num mt-0.5 text-2xl font-bold text-cyan-300">{briefing.pending_cases}</div>
-              </div>
-              <div>
-                <div className="text-[11px] text-slate-400">Statutory SLA Overdue</div>
-                <div className="num mt-0.5 text-2xl font-bold text-red-400">{briefing.overdue_cases}</div>
-              </div>
-              <div>
-                <div className="text-[11px] text-slate-400">Coordination Taskforces</div>
-                <div className="num mt-0.5 text-2xl font-bold text-amber-300">{briefing.active_rooms}</div>
-              </div>
+            <div className="mt-5 grid grid-cols-2 gap-5 sm:grid-cols-4">
+              {[['Complaints received', briefing.total_cases, 'text-paper'], ['Still open', briefing.pending_cases, 'text-sky-200'],
+                ['Past their due date', briefing.overdue_cases, 'text-red-300'], ['Coordination rooms', briefing.active_rooms, 'text-amber-200']].map(([l, v, c]: any) => (
+                <div key={l}><div className="text-[12px] text-paper/70">{l}</div><div className={'font-display num mt-1 text-[2.25rem] font-semibold leading-none ' + c}>{v}</div></div>))}
             </div>
           </div>
 
           {/* Structured Sections with Clickable Citations */}
           {briefing.sections.map((sec: any) => (
             <Card key={sec.id} title={sec.title} right={sec.badge && <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-700">{sec.badge}</span>}>
-              <div className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+              <div className="whitespace-pre-wrap text-[15px] leading-relaxed text-slate-700">
                 {renderCitations(sec.content, briefing.citations)}
               </div>
             </Card>
           ))}
 
-          {/* Verification Footnote */}
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
-            <div className="flex items-center gap-2 font-semibold text-slate-700">
-              <CheckCircle2 size={15} className="text-emerald-600" /> Grounded Evidence Guarantee
-            </div>
-            <p className="mt-1 leading-relaxed">
-              Every numerical claim and institution alert above is deterministically computed from underlying
-              complaint dockets. Click any blue bracketed docket chip (e.g. <span className="font-mono text-blue-600 font-bold">[CASE-...]</span>) to inspect its full evidence dossier and hash-chained action history.
-            </p>
+          {/* Verification footnote */}
+          <div className="rounded-xl border border-dashed border-slate-300 p-4 text-[13px] text-slate-500">
+            <div className="flex items-center gap-2 font-semibold text-slate-700"><CheckCircle2 size={15} className="text-emerald-600" /> Every figure can be checked</div>
+            <p className="mt-1 leading-relaxed">Numbers and warnings above are counted directly from the cases, not estimated. Select any highlighted case number, such as <span className="font-mono font-semibold text-blue-700">[CASE-...]</span>, to see the case and its full history.</p>
           </div>
         </div>
       )}

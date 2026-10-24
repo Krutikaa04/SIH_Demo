@@ -115,22 +115,22 @@ export default function Galaxy() {
   }, [])
 
   return (
-    <div className="flex h-[calc(100vh-6rem)] flex-col gap-3">
+    <div className="flex h-[calc(100vh-11rem)] min-h-[480px] flex-col gap-3 md:h-[calc(100vh-9rem)]">
       {/* Top Controls Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-sheet px-4 py-3 shadow-sm">
         <div className="flex items-center gap-2.5">
           <div className="grid h-8 w-8 place-items-center rounded-lg bg-navy text-white">
             <Share2 size={16} />
           </div>
           <div>
-            <h1 className="text-sm font-bold text-slate-900">Connection Galaxy · Interactive Graph</h1>
-            <p className="text-[11px] text-slate-500">Cross-bureau complaint relationship topology &amp; taskforce clusters</p>
+            <h1 className="font-display text-[1.125rem] font-semibold text-slate-900">Connection map</h1>
+            <p className="text-[12px] text-slate-500">How institutions, Bureaus and overlapping cases connect. Drag to move, scroll to zoom, select anything for details.</p>
           </div>
         </div>
 
         {/* Bureau Filters */}
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] font-medium text-slate-500 mr-1">Bureau:</span>
+          <span className="text-[12px] font-medium text-slate-500 mr-1">Show Bureau:</span>
           {['', 'RB', 'PGRC', 'AB', 'LC', 'VIG'].map((b) => (
             <button
               key={b}
@@ -147,13 +147,13 @@ export default function Galaxy() {
         {/* Legend */}
         <div className="hidden lg:flex items-center gap-3 text-[11px] text-slate-600">
           <span className="flex items-center gap-1">
-            <span className="h-2 w-2 rounded-full bg-cyan-500" /> Confirmed Link
+            <span className="h-2 w-2 rounded-full bg-cyan-500" /> Confirmed link
           </span>
           <span className="flex items-center gap-1">
-            <span className="h-2 w-2 rounded-full bg-purple-500" /> High Overlap (AI)
+            <span className="h-2 w-2 rounded-full bg-purple-500" /> Strong overlap
           </span>
           <span className="flex items-center gap-1">
-            <span className="h-2 w-2 rounded-full bg-amber-500" /> Taskforce Cluster
+            <span className="h-2 w-2 rounded-full bg-amber-500" /> Coordination room
           </span>
         </div>
       </div>
