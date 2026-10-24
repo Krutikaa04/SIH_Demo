@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { AlertTriangle, CheckCircle2, FileDown, FilePlus2, FileSpreadsheet, Search, Siren, Upload } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, FileDown, FilePlus2, FileSpreadsheet, Inbox, Search, Siren, Upload } from 'lucide-react'
 import { api, post, useApi, useRole } from '../api'
 import { BureauBadge, Card, ScoreRing, StatusChip, cx, fmtDate } from '../ui'
 
@@ -51,6 +51,7 @@ function SingleForm() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<any>(null)
   const [done, setDone] = useState<any>(null)
+  const [parked, setParked] = useState<any>(null)
   const [manualQ, setManualQ] = useState('')
   const found = useApi<any>(manualQ.trim().length >= 2 ? `/institutions?q=${encodeURIComponent(manualQ)}` : null, false)
   const set = (k: string, v: any) => setF((x: any) => ({ ...x, [k]: v }))
@@ -68,9 +69,32 @@ function SingleForm() {
   const overlaps = pv?.potential_overlaps || []
   const affected = Array.from(new Set(overlaps.map((o: any) => o.bureau)))
 
+  const canPark = pv?.ok && !matched && !!f.bureau && !!f.category && f.description.trim().length >= 10 && !busy && me.role !== 'REGIONAL'
+
   async function submit() {
     setBusy(true); setErr(null)
     try { setDone(await post('/complaints', f)) } catch (e: any) { setErr(e) } finally { setBusy(false) }
+  }
+  async function saveForReview() {
+    setBusy(true); setErr(null)
+    try { setParked(await post('/complaints', { ...f, park_unmatched: true })) } catch (e: any) { setErr(e) } finally { setBusy(false) }
+  }
+
+  if (parked) {
+    return (
+      <Card>
+        <div className="flex items-start gap-4">
+          <div className="rounded-full bg-amber-100 p-3 text-amber-600"><Inbox size={26} /></div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-lg font-bold">Saved for review: {parked.queue_id}</h2>
+            <p className="mt-1 text-sm text-slate-600">The institution could not be matched with confidence, so no case was created yet. An official can pick the institution in the review queue, and the complaint then goes through the normal overlap check.</p>
+            <div className="mt-4 flex gap-2">
+              <button onClick={() => { setParked(null); setF(blank); setPv(null) }} className="rounded-lg bg-navy px-4 py-2 text-sm font-semibold text-white hover:bg-navy-2">Register another</button>
+              <Link to="/unmatched" className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium hover:bg-slate-50">Open review queue</Link>
+            </div>
+          </div>
+        </div>
+      </Card>)
   }
 
   if (done) {
@@ -141,6 +165,10 @@ function SingleForm() {
             className="w-full rounded-lg bg-saffron py-3 text-sm font-semibold text-white shadow-sm hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-40">
             {busy ? 'Registering…' : overlaps.length ? `Register — will alert ${affected.join(', ')}` : 'Register complaint'}
           </button>
+          {canPark && (
+            <button onClick={saveForReview}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-amber-300 bg-amber-50 py-2.5 text-sm font-semibold text-amber-900 hover:bg-amber-100">
+              <Inbox size={15} /> Cannot find the institution — save for review</button>)}
         </div>
       </Card>
 
@@ -230,10 +258,11 @@ function BulkImport() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [fileName, setFileName] = useState('')
+  const [park, setPark] = useState(false)
 
   async function run(dry: boolean) {
     setBusy(true); setErr('')
-    try { setRes(await post('/complaints/import', { csv_text: text, dry_run: dry })) } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+    try { setRes(await post('/complaints/import', { csv_text: text, dry_run: dry, park_unmatched: park })) } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
   function onFile(e: any) {
     const f: File = e.target.files?.[0]
@@ -250,10 +279,10 @@ function BulkImport() {
     setTimeout(() => URL.revokeObjectURL(url), 1500)
   }
   const chip = (s: string) => ({
-    ok: 'bg-emerald-100 text-emerald-700', created: 'bg-blue-100 text-blue-700', needs_review: 'bg-amber-100 text-amber-800', error: 'bg-red-100 text-red-700',
+    ok: 'bg-emerald-100 text-emerald-700', created: 'bg-blue-100 text-blue-700', needs_review: 'bg-amber-100 text-amber-800', parked: 'bg-amber-100 text-amber-800', error: 'bg-red-100 text-red-700',
   } as any)[s]
-  const label = (s: string) => ({ ok: 'Ready', created: 'Created', needs_review: 'Needs review', error: 'Error' } as any)[s]
-  const ready = res?.dry_run ? res.counts.ok : 0
+  const label = (s: string) => ({ ok: 'Ready', created: 'Created', needs_review: 'Needs review', parked: 'In review queue', error: 'Error' } as any)[s]
+  const ready = res?.dry_run ? res.counts.ok + (park ? res.counts.needs_review : 0) : 0
 
   return (
     <div className="space-y-5">
@@ -267,6 +296,9 @@ function BulkImport() {
         <textarea value={text} onChange={(e) => { setText(e.target.value); setRes(null) }} rows={8} placeholder="Paste CSV here, or choose a file…" className={cx(input, 'font-mono text-xs')} />
         {fileName && <div className="mt-1 text-[11px] text-slate-400">Loaded: {fileName}</div>}
         {err && <div className="mt-2 rounded-lg bg-red-50 p-3 text-sm text-red-700">{err}</div>}
+        <label className="mt-3 flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+          <input type="checkbox" checked={park} onChange={(e) => { setPark(e.target.checked); setRes(null) }} className="mt-0.5" />
+          <span>Save rows whose institution cannot be matched to the <b>review queue</b> instead of skipping them.</span></label>
         <div className="mt-3 flex gap-2">
           <button disabled={!text.trim() || busy} onClick={() => run(true)} className="rounded-lg bg-navy px-4 py-2 text-sm font-semibold text-white hover:bg-navy-2 disabled:opacity-40">Validate (nothing is saved)</button>
           <button disabled={!ready || busy} onClick={() => run(false)} className="rounded-lg bg-saffron px-4 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-40">Import {ready || ''} valid complaint{ready === 1 ? '' : 's'}</button>
@@ -276,7 +308,7 @@ function BulkImport() {
       {res && (
         <Card title={res.dry_run ? '2 · Validation result' : 'Import complete'}
           right={<div className="flex flex-wrap gap-3 text-xs">
-            {(['ok', 'created', 'needs_review', 'error'] as const).filter((k) => res.counts[k] > 0).map((k) => <span key={k} className={cx('rounded-full px-2.5 py-1 font-semibold', chip(k))}>{res.counts[k]} {label(k).toLowerCase()}</span>)}
+            {(['ok', 'created', 'needs_review', 'parked', 'error'] as const).filter((k) => res.counts[k] > 0).map((k) => <span key={k} className={cx('rounded-full px-2.5 py-1 font-semibold', chip(k))}>{res.counts[k]} {label(k).toLowerCase()}</span>)}
             {res.counts.overlaps > 0 && <span className="rounded-full bg-red-100 px-2.5 py-1 font-semibold text-red-700">{res.counts.overlaps} overlap{res.counts.overlaps > 1 ? 's' : ''}</span>}
           </div>} pad={false}>
           <div className="overflow-x-auto">
@@ -291,6 +323,7 @@ function BulkImport() {
                     <td className="max-w-[220px] truncate px-4 py-2.5 text-slate-700">{r.institution_name}</td>
                     <td className="px-4 py-2.5 text-slate-600">
                       {r.matched && <span>{r.matched}{r.case_id && <> → <Link className="font-semibold text-navy-2 hover:underline" to={`/cases/${r.case_id}`}>{r.case_id}</Link></>}</span>}
+                      {r.queue_id && <span>Saved as <Link className="font-semibold text-navy-2 hover:underline" to="/unmatched">{r.queue_id}</Link></span>}
                       {r.message && <span className="text-red-700">{r.message}</span>}
                       {r.suggestions?.length > 0 && <div className="text-xs text-slate-500">Did you mean: {r.suggestions.map((s: any) => s.name).join(' · ')}?</div>}
                     </td>

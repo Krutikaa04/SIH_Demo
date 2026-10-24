@@ -377,12 +377,36 @@ def _finish_case(conn, case_id, pairs, notify=True):
     return alert_ids
 
 
-def register_complaint(conn, d, ctx=None, notify=True, reg=None):
-    """Register one complaint through the REAL pipeline: resolve -> insert -> history -> overlap scoring -> alerts."""
+def park_complaint(conn, d, ctx, suggestions):
+    """Store a complaint whose institution could not be matched in the review queue (see unmatched.py)."""
+    dup = db.one(conn, "SELECT id FROM unmatched_complaints WHERE status='OPEN' AND bureau=? AND institution_name=? "
+                       "AND json_extract(payload,'$.description')=?", (d["bureau"], d["institution_name"], d["description"]))
+    if dup:
+        raise ValueError(f"This complaint is already waiting in the review queue as {dup['id']}")
+    queue_id = "UNM-%04d" % db.next_counter(conn, "unmatched_seq")
+    P = ctx.persona if ctx is not None else ("SYS", "Diary Section", "SYS")
+    top = suggestions[:5]
+    conn.execute("INSERT INTO unmatched_complaints(id,payload,institution_name,aicte_id,bureau,suggestions,created_by,"
+                 "created_by_role,created_at,status) VALUES(?,?,?,?,?,?,?,?,?,'OPEN')",
+                 (queue_id, json.dumps(d), d["institution_name"], d["aicte_id"], d["bureau"], json.dumps(top), P[1], P[2],
+                  db.iso(db.now(conn))))
+    conn.commit()
+    events.publish("dashboard.invalidate", {})
+    return {"status": "PARKED", "queue_id": queue_id, "suggestions": top}
+
+
+def register_complaint(conn, d, ctx=None, notify=True, reg=None, park_unmatched=False):
+    """Register one complaint through the REAL pipeline: resolve -> insert -> history -> overlap scoring -> alerts.
+
+    With park_unmatched an unmatchable institution does not raise Unresolved: the complaint is stored in the review
+    queue and {"status": "PARKED", "queue_id": ...} is returned instead of a case."""
     reg = reg or intel.Registry(conn)
     res = resolve_institution(reg, d)
     if not res:
-        raise Unresolved(reg.suggest(d["institution_name"]))
+        suggestions = reg.suggest(d["institution_name"])
+        if park_unmatched:
+            return park_complaint(conn, d, ctx, suggestions)
+        raise Unresolved(suggestions)
     twin = db.one(conn, "SELECT case_id FROM cases WHERE institution_id=? AND bureau_code=? AND description=? "
                         "AND status!='Disposed'", (res["institution_id"], d["bureau"], d["description"]))
     if twin:
@@ -480,8 +504,11 @@ CSV_ALIASES = {
 MAX_IMPORT_ROWS = 500
 
 
-def import_complaints(conn, csv_text, ctx, dry_run=True):
-    """Bulk import. dry_run validates and previews every row; otherwise valid rows are registered one by one."""
+def import_complaints(conn, csv_text, ctx, dry_run=True, park_unmatched=False):
+    """Bulk import. dry_run validates and previews every row; otherwise valid rows are registered one by one.
+
+    park_unmatched (real run only): rows whose institution cannot be matched go to the review queue instead of
+    being skipped."""
     import csv
     import io as _io
     text = csv_text.lstrip("\ufeff")
@@ -502,8 +529,15 @@ def import_complaints(conn, csv_text, ctx, dry_run=True):
             d = clean_complaint(conn, data, ctx)
             res = resolve_institution(reg, d)
             if not res:
+                suggestions = reg.suggest(d["institution_name"])
+                if park_unmatched and not dry_run:
+                    parked = park_complaint(conn, d, ctx, suggestions)
+                    results.append({"row": n, "status": "parked", "institution_name": label, "bureau": d["bureau"],
+                                    "category": d["category"], "queue_id": parked["queue_id"],
+                                    "message": "", "suggestions": suggestions[:3]})
+                    continue
                 results.append({"row": n, "status": "needs_review", "institution_name": label,
-                                "message": "Institution not matched with confidence", "suggestions": reg.suggest(d["institution_name"])[:3]})
+                                "message": "Institution not matched with confidence", "suggestions": suggestions[:3]})
                 continue
             iname = reg.by_id[res["institution_id"]]["name"]
             if dry_run:
@@ -525,7 +559,7 @@ def import_complaints(conn, csv_text, ctx, dry_run=True):
         except Unresolved as e:
             results.append({"row": n, "status": "needs_review", "institution_name": label,
                             "message": "Institution not matched with confidence", "suggestions": e.suggestions[:3]})
-    counts = {k: sum(1 for r in results if r["status"] == k) for k in ("created", "ok", "needs_review", "error")}
+    counts = {k: sum(1 for r in results if r["status"] == k) for k in ("created", "ok", "needs_review", "parked", "error")}
     counts["overlaps"] = sum(r.get("overlaps", 0) for r in results)
     if not dry_run and counts["created"]:
         events.publish("case.created", {"count": counts["created"]})

@@ -18,6 +18,7 @@ import Register from './pages/Register'
 import Galaxy from './pages/Galaxy'
 import Briefings from './pages/Briefings'
 import Outbox from './pages/Outbox'
+import Unmatched from './pages/Unmatched'
 
 startEvents()
 
@@ -40,6 +41,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="reports" element={<Reports />} />
             <Route path="register" element={<Register />} />
             <Route path="outbox" element={<Outbox />} />
+            <Route path="unmatched" element={<Unmatched />} />
           </Route>
         </Routes>
       </ToastProvider>

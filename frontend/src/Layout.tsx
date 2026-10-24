@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Bell, BarChart3, FilePlus2, Building2, FolderOpen, GitMerge, LayoutDashboard, FlaskConical, Search, Zap, RotateCcw, FastForward, ChevronDown, ShieldCheck, ShieldAlert, UserCog, Clock3, Share2, FileText, Send } from 'lucide-react'
+import { Bell, BarChart3, FilePlus2, Building2, FolderOpen, GitMerge, LayoutDashboard, FlaskConical, Search, Zap, RotateCcw, FastForward, ChevronDown, ShieldCheck, ShieldAlert, UserCog, Clock3, Share2, FileText, Send, Inbox } from 'lucide-react'
 import { post, api, setRole, useApi, useRole } from './api'
 import { useToast } from './toast'
 import { ago, cx } from './ui'
@@ -9,6 +9,7 @@ const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/cases', label: 'Cases', icon: FolderOpen },
   { to: '/register', label: 'Register complaint', icon: FilePlus2 },
+  { to: '/unmatched', label: 'Review queue', icon: Inbox, badge: 'unmatched' },
   { to: '/overlaps', label: 'Overlaps', icon: GitMerge, badge: 'overlaps' },
   { to: '/galaxy', label: 'Connection Galaxy', icon: Share2 },
   { to: '/institutions', label: 'Institutions', icon: Building2 },
@@ -27,6 +28,7 @@ export default function Layout() {
   const meta = useApi<any>('/meta', false)
   const overlaps = useApi<any>('/overlaps')
   const alerts = useApi<any>('/alerts?limit=6')
+  const unmatched = useApi<any>('/unmatched')
   const clock = useApi<any>('/clock')
   const [q, setQ] = useState('')
   const [busy, setBusy] = useState(false)
@@ -52,6 +54,7 @@ export default function Layout() {
   const counts: Record<string, number> = {
     overlaps: (overlaps.data?.items || []).filter((c: any) => c.status === 'OPEN').length,
     alerts: alerts.data?.unread || 0,
+    unmatched: unmatched.data?.counts?.OPEN || 0,
   }
   const offset = clock.data?.offset_days || 0
   const roleLabel = (meta.data?.roles || []).find((r: any) => r.code === me.role)?.label || me.role
@@ -120,7 +123,7 @@ export default function Layout() {
           </div>
         </div>
         <nav className="mt-2 flex-1 space-y-1 px-3">
-          {NAV.map((n) => (
+          {NAV.filter((n) => !(n.to === '/unmatched' && me.role === 'REGIONAL')).map((n) => (
             <NavLink key={n.to} to={n.to} end={n.end}
               className={({ isActive }) => cx('flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition',
                 isActive ? 'bg-white/12 text-white shadow-inner' : 'text-slate-300 hover:bg-white/6 hover:text-white')}>

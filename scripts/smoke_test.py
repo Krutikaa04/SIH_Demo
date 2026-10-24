@@ -91,6 +91,20 @@ def flow(round_no):
     _, d, _ = call("/dashboard/summary")
     check("effort-saved counter ticks", d["effort_saved"]["clusters_resolved"] == 1)
 
+    other_inst = call("/institutions")[1]["items"][-1]["aicte_id"]
+    s, parked, _ = call("/complaints", "POST", {"institution_name": "Zzyzx Quorlfplat Institute of Nothing", "bureau": "RB",
+                                               "category": "Faculty Deficiency", "park_unmatched": True,
+                                               "description": "Students report that faculty positions are vacant and visiting teachers take classes."})
+    check("unmatched complaint is parked, not lost", s == 200 and parked["status"] == "PARKED")
+    _, q, _ = call("/unmatched")
+    check("review queue lists it", [i["id"] for i in q["items"]] == [parked["queue_id"]])
+    s, _, _ = call(f"/unmatched/{parked['queue_id']}/resolve", "POST", {"institution_id": other_inst}, role="PGRC")
+    check("another Bureau cannot resolve it (403)", s == 403)
+    s, res, _ = call(f"/unmatched/{parked['queue_id']}/resolve", "POST", {"institution_id": other_inst}, role="RB")
+    check("receiving Bureau resolves it into a real case", s == 200 and res["case"]["case_id"] and not res["already_resolved"])
+    _, q, _ = call("/unmatched")
+    check("queue is empty after resolving", q["counts"]["OPEN"] == 0 and q["counts"]["RESOLVED"] == 1)
+
     _, pool, _ = call("/cases?page_size=200")
     free = {}
     for c in pool["items"]:
@@ -167,7 +181,7 @@ def sweep():
     print("\n=== Read-endpoint sweep for every role (no 5xx allowed) ===")
     paths = ["/meta", "/clock", "/dashboard/summary", "/cases?page_size=5", "/cases?overdue=1", "/cases?overlap=1",
              "/institutions", "/overlaps", "/overlaps?status=all", "/alerts", "/reports/bureau", "/reports/periodic?period=quarter",
-             "/search/nl?q=escalated%20faculty%20cases", "/audit/verify", "/export/cases?bureau=RB"]
+             "/search/nl?q=escalated%20faculty%20cases", "/audit/verify", "/export/cases?bureau=RB", "/unmatched"]
     slow = []
     for role in ["RB", "PGRC", "AB", "LC", "VIG", "REGIONAL", "SENIOR"]:
         for p in paths:

@@ -49,7 +49,7 @@ Run the backend in another terminal with `python run.py --no-browser`.
 - **Reports & analytics**: Bureau-wise, region-wise, institution-wise, status-wise, ageing, disposal rate, overlaps and
   monthly/quarterly with filter bar, each with CSV and PDF export; the case list and institution history also export to CSV
 - **Supporting documents** on cases (upload/download, SHA-256 verified, recorded in the hash-chained history)
-- **Register complaint** (new page): live institution match and overlap preview while typing, plus bulk CSV import (validate first)
+- **Register complaint** (new page): live institution match and overlap preview while typing, plus bulk CSV import (validate first); complaints whose institution cannot be matched can be saved to the **Review queue** and registered later
 - **Coordination guard**: acting on an overlapping case needs a logged acknowledgement; after a MERGE the follower Bureau cannot transfer/escalate/dispose
 - **Daily briefing** for Senior Management / Regional Offices and a "duplicate effort saved" estimate on the dashboard
 

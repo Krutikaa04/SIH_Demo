@@ -187,7 +187,7 @@ Background cases are generated with an **exact collision check** using the real 
 2. Else normalise the name (lowercase, strip punctuation, expand `ABBR` govt→government, engg→engineering, coll→college, inst→institute, tech→technology…, map `CITY_ALIAS` bangalore→bengaluru, bombay→mumbai, madras→chennai…, drop stopwords).
 3. If a known city appears in the name → compare only against that city's institutions (**city blocking**); else compare against names without the city and require a clear winner (gap ≥5).
 4. `rapidfuzz.token_sort_ratio`; ≥88 → `NAME`, 80–88 → `NAME_LOW`, else unresolved. Ties/ambiguity (within 2 points) → unresolved.
-5. Unresolved complaints are **not** handled by a review queue yet (see backlog).
+5. Complaints that cannot be matched can be **parked in the review queue** (`unmatched.py`, §7.6b) and registered later.
 
 ### 7.2 Overlap scoring (`intel.score_pair`) — total 100
 | Signal | Max | Rule |
@@ -242,7 +242,7 @@ Read state is **per role**: one Bureau reading a shared alert does not clear it 
 ### 7.6b Registering complaints (`services.py`, `pages/Register.tsx`)
 Every new complaint — from the **Register form**, a **CSV import**, or the **Simulate** button — goes through one function, `services.register_complaint()`: validate (`clean_complaint`) → resolve the institution → duplicate check (same institution + Bureau + text while still open) → least-loaded desk officer → insert case → two history events → `intel.detect(only_case=…)` → overlap alerts → SSE push.
 - **Live check:** `POST /api/complaints/preview` (no writes) returns the resolved institution (+ method/confidence), up to 5 `suggestions` when the match is missing or low-confidence (ranking ignores generic words like "college/institute"), the institution's open cases, and the **potential overlaps with score breakdown** — so the official sees "Potential Overlapping Cases" *before* submitting.
-- **Unresolved names:** `register` returns `422 UNRESOLVED_INSTITUTION` with suggestions; the user picks the institution (method `MANUAL`) or searches the master list. There is still **no review queue** for unresolved rows (backlog).
+- **Unresolved names:** `register` returns `422 UNRESOLVED_INSTITUTION` with suggestions; the user picks the institution (method `MANUAL`) or searches the master list. Instead of picking on the spot the user can choose **Save for review** (`park_unmatched:true`): the cleaned complaint is stored in `unmatched_complaints` (`UNM-0001`…) and nobody loses it. The **Review queue** page (`/unmatched`, sidebar badge = waiting items) lists parked complaints with the closest institutions and a master-list search. **Register** re-validates the payload and runs the normal `register_complaint` pipeline (overlap scoring, alerts) with method `MANUAL`, adds an `INSTITUTION_MATCHED` history entry and links `resolved_case_id`; resolving twice returns the same case. **Discard** needs a reason and keeps the row (`DISCARDED`, who/when/why) as an audit record. Park: any non-Regional role (a Bureau only for itself); resolve/discard/see: the receiving Bureau and Senior. CSV import has a *Save unmatched rows to the review queue* option (real run only; dry runs never write).
 - **CSV import:** `POST /api/complaints/import {csv_text, dry_run}`; column aliases are accepted (`institution`, `complaint`, `date`…); max 500 rows; `dry_run:true` validates + previews every row (ready / needs review / error); the real run registers valid rows sequentially (so later rows can overlap with earlier ones) and sends one summary toast instead of one per row.
 - Bureau roles always register into **their own Bureau** (the bureau field is locked/ignored); Senior/Regional choose the Bureau.
 
@@ -312,7 +312,8 @@ Rule-based grammar → the same filter params the Cases page uses + a list of **
 | `GET /reports/{bureau\|region\|institution\|ageing\|disposal\|overlaps\|periodic}?format=json\|csv&period=month\|quarter` | reports |
 | `GET /export/cases?<same filters>` | CSV export of the filtered case list |
 | `GET /audit/verify?case_id=` | verify the hash chain (all cases if omitted) |
-| `POST /complaints/preview` · `POST /complaints` · `POST /complaints/import` | register-form live check (no writes) · register one complaint (`422 UNRESOLVED_INSTITUTION` + suggestions) · bulk CSV import (`dry_run`) |
+| `POST /complaints/preview` · `POST /complaints` · `POST /complaints/import` | register-form live check (no writes) · register one complaint (`422 UNRESOLVED_INSTITUTION` + suggestions, or `{status:"PARKED",queue_id}` with `park_unmatched:true`) · bulk CSV import (`dry_run`, `park_unmatched`) |
+| `GET /unmatched?status=OPEN\|RESOLVED\|DISCARDED\|ALL` · `POST /unmatched/{id}/resolve {institution_id}` · `DELETE /unmatched/{id}?reason=` | review queue (items + `counts`) · register a parked complaint under the chosen institution (idempotent) · discard with a reason |
 | `POST /simulate/complaint {scenario?:1..6}` | file a scripted complaint through the real pipeline (uses `register_complaint`) |
 | `POST /admin/clock {add_days}` · `/admin/tamper` · `/admin/reset` | demo tools |
 | `GET /events` | SSE stream |
@@ -359,7 +360,7 @@ Interactive docs: `http://127.0.0.1:8000/docs` (FastAPI Swagger) while the app r
 - **No email/SMS** — alerts are in-app only; "send reminder" isn't implemented at all (planned as a message preview/outbox mock).
 - **Data is synthetic**; officials can now register complaints and import CSVs, but there are still no live feeds from CPGRAMS/Bureau systems; the institution master is the seeded table.
 - **English only**; no Hindi/regional-language matching.
-- **No review queue** for complaints whose institution can't be resolved: the Register form asks the user to pick from suggestions, and CSV rows that don't match are reported as "needs review" and **skipped** (fix the CSV and re-upload). Nothing is parked for later.
+- **Review queue is manual**: parked complaints wait until an official resolves or discards them (no reminders/SLA on the queue yet, no retention policy for discarded rows). Unless "Save for review" / "park unmatched rows" is chosen, the old behaviour stays: the user picks from suggestions and unmatched CSV rows are skipped.
 - **Weights are hand-set** (calibrated on the test pairs), not learned from feedback; no officer "was this right?" loop.
 - **SLA values are illustrative**; single SLA per Bureau (no per-category/statutory SLAs, no working-day/holiday calendar).
 - **Coordination "merge" is logical** — cases are linked under a lead Bureau (and the guard restricts follower Bureaus), but nothing syncs to systems of record. Manual links are same-institution only (an institution renamed in the master list cannot be bridged), and a room can only be opened from a cluster (detected or manual).
@@ -383,7 +384,6 @@ Suggested split mirrors the original four tracks. Effort is a rough developer-ho
 - Move to PostgreSQL + a real job runner for the SLA tick (4–6 h, production scope).
 
 **Track B — Intelligence**
-- **Review queue for unresolved/ambiguous institution matches** (park the complaint, let an officer confirm later; reuse `Registry.suggest`) (3 h).
 - **Officer feedback on overlaps** ("was this right?" thumbs) storing labels; script to re-tune weights/thresholds (3–4 h).
 - Multilingual (Hindi) matching via on-prem embeddings, e.g. MuRIL/IndicBERT (research, 6+ h).
 - Add more labelled pairs + edge cases to `test_prototype.py` as the data grows.

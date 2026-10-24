@@ -15,6 +15,15 @@ GENESIS = "0" * 64
 READY = threading.Event()
 READY.set()
 
+UNMATCHED_DDL = """
+CREATE TABLE IF NOT EXISTS unmatched_complaints (
+  id TEXT PRIMARY KEY, payload TEXT, institution_name TEXT, aicte_id TEXT, bureau TEXT, suggestions TEXT,
+  created_by TEXT, created_by_role TEXT, created_at TEXT, status TEXT DEFAULT 'OPEN',
+  resolved_case_id TEXT, resolved_by TEXT, resolved_at TEXT, discard_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_unmatched_status ON unmatched_complaints(status, bureau);
+"""
+
 SCHEMA = """
 CREATE TABLE institutions (
   aicte_id TEXT PRIMARY KEY, name TEXT, city TEXT, state TEXT, region TEXT, address TEXT,
@@ -81,9 +90,10 @@ CREATE TABLE outbox (
   status TEXT DEFAULT 'SIMULATED', created_by TEXT, created_at TEXT
 );
 CREATE INDEX ix_outbox_alert ON outbox(alert_id);
-"""
+""" + UNMATCHED_DDL
 
 TABLES = [
+    "unmatched_complaints",
     "institutions",
     "officers",
     "cases",
@@ -126,6 +136,10 @@ def connect():
             conn.execute(ddl)
         except sqlite3.OperationalError:
             pass
+    try:  # databases created before the unmatched-complaint review queue (issue #14)
+        conn.executescript(UNMATCHED_DDL)
+    except sqlite3.OperationalError:
+        pass
     try:
         conn.execute("""
         CREATE TABLE IF NOT EXISTS outbox (
