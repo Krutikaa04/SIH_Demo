@@ -330,7 +330,7 @@ def preview_pairs(conn, draft):
 def recluster(conn, institution_id):
     """Union-find over the institution's active pairs; assign stable cluster ids."""
     pairs = db.rows(conn, "SELECT id,case_a,case_b,cluster_id FROM overlap_pairs "
-                          "WHERE institution_id=? AND status!='DISMISSED'", (institution_id,))
+                          "WHERE institution_id=? AND status NOT IN ('DISMISSED','REJECTED')", (institution_id,))
     parent = {}
 
     def find(x):

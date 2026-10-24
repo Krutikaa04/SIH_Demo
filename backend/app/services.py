@@ -85,7 +85,9 @@ def cluster_map(conn):
             c["band"] = "HIGH"
     for c in out.values():
         s = c.pop("statuses")
-        c["status"] = ("OPEN" if "OPEN" in s else "LINKED" if "LINKED" in s else
+        # Per-pair review statuses: DEFERRED keeps the overlap open, CONFIRMED keeps it active (like LINKED).
+        # Only RESOLVED / DISMISSED end it. (REJECTED pairs are detached from their cluster in review_overlap_pair.)
+        c["status"] = ("OPEN" if s & {"OPEN", "DEFERRED"} else "LINKED" if s & {"LINKED", "CONFIRMED"} else
                        "RESOLVED" if "RESOLVED" in s else "DISMISSED")
     return out
 

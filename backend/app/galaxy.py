@@ -33,7 +33,8 @@ def generate_galaxy_graph(conn, bureau_filter: Optional[str] = None) -> Dict[str
     inst_map = {r["aicte_id"]: r for r in inst_rows}
 
     # Overlap pairs involving these cases
-    pairs = db.rows(conn, "SELECT id, case_a, case_b, institution_id, score, band, status, cluster_id, headline FROM overlap_pairs")
+    pairs = db.rows(conn, "SELECT id, case_a, case_b, institution_id, score, band, status, cluster_id, headline "
+                          "FROM overlap_pairs WHERE status != 'REJECTED'")
     
     # Rooms
     rooms = db.rows(conn, "SELECT id, cluster_id, institution_id, lead_bureau, status FROM coordination_rooms")

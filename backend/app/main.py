@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import db, events, extras, reports, risk, roles, seed, services, sla, galaxy, briefings
+from . import db, events, extras, intel, reports, risk, roles, seed, services, sla, galaxy, briefings
 from .constants import (BUREAUS, BUREAU_ORDER, CATEGORIES, OPEN_STATUSES, REGION_STATES, SLA_DAYS, STATUSES)
 from .roles import get_ctx
 
@@ -393,24 +393,38 @@ def review_overlap_pair(pair_id: str, body: dict = Body(...), conn=Depends(db.ge
         raise HTTPException(400, "Decision must be CONFIRMED, REJECTED, or DEFERRED")
     if not rationale:
         raise HTTPException(422, "Mandatory review rationale is required")
+    if ctx.role == "REGIONAL":
+        roles.forbid("Regional Offices cannot review overlap links")
     p = db.one(conn, "SELECT * FROM overlap_pairs WHERE id=?", (pair_id,))
     if not p:
         raise HTTPException(404, "Pair not found")
-    
+
     now_iso = db.iso(db.now(conn))
     P = ctx.persona
     actor_id, actor_name, actor_bureau = P[0], P[1], P[2]
-    
+
     conn.execute(
         "UPDATE overlap_pairs SET status=?, review_rationale=?, review_by=?, review_at=? WHERE id=?",
         (decision, rationale, actor_name, now_iso, pair_id)
     )
-    # Record in cryptographic audit trail for primary case
-    db.append_action(
-        conn, p["case_a"], now_iso, actor_id, actor_name, actor_bureau,
-        f"OVERLAP_{decision}", None, None,
-        f"Overlap with {p['case_b']} reviewed as {decision}. Reason: {rationale}"
-    )
+    # Record in the cryptographic audit trail of BOTH cases
+    for mine, other in ((p["case_a"], p["case_b"]), (p["case_b"], p["case_a"])):
+        db.append_action(
+            conn, mine, now_iso, actor_id, actor_name, actor_bureau,
+            f"OVERLAP_{decision}", None, None,
+            f"Overlap with {other} reviewed as {decision}. Reason: {rationale}"
+        )
+    if decision == "REJECTED":
+        # "Not related": take the pair out of its cluster, and free any case that has no other active link
+        conn.execute("UPDATE overlap_pairs SET cluster_id=NULL WHERE id=?", (pair_id,))
+        for cid in (p["case_a"], p["case_b"]):
+            still_linked = conn.execute(
+                "SELECT 1 FROM overlap_pairs WHERE cluster_id IS NOT NULL AND status NOT IN ('REJECTED') "
+                "AND (case_a=? OR case_b=?) LIMIT 1", (cid, cid)).fetchone()
+            if not still_linked:
+                conn.execute("UPDATE cases SET cluster_id=NULL WHERE case_id=?", (cid,))
+    # re-derive clusters (a previously rejected pair that is now CONFIRMED / DEFERRED re-joins its cluster)
+    intel.recluster(conn, p["institution_id"])
     conn.commit()
     events.publish("dashboard.invalidate", {})
     return {"ok": True, "pair_id": pair_id, "status": decision, "review_rationale": rationale, "review_by": actor_name, "review_at": now_iso}
@@ -629,9 +643,15 @@ def tamper(body: dict = Body(default={}), conn=Depends(db.get_conn)):
     row = db.one(conn, "SELECT id, remarks FROM action_history WHERE case_id=? AND seq=?", (case_id, seq))
     if not row:
         raise HTTPException(404, "record not found")
-    # Store backup for restore & re-verify
-    db.set_setting(conn, "tamper_backup_" + str(row["id"]), row["remarks"])
-    db.set_setting(conn, "tampered_row_id", str(row["id"]))
+    # Keep the PRISTINE text for restore: never overwrite an existing backup (a second click would otherwise
+    # store the already-tampered text), and remember every tampered row, not just the last one.
+    key = "tamper_backup_" + str(row["id"])
+    if db.get_setting(conn, key) is None:
+        db.set_setting(conn, key, row["remarks"])
+    ids = [x for x in (db.get_setting(conn, "tampered_row_ids", "") or "").split(",") if x]
+    if str(row["id"]) not in ids:
+        ids.append(str(row["id"]))
+    db.set_setting(conn, "tampered_row_ids", ",".join(ids))
     conn.execute("UPDATE action_history SET remarks='Complaint closed without any action' WHERE id=?", (row["id"],))
     conn.commit()
     events.publish("dashboard.invalidate", {})
@@ -641,15 +661,16 @@ def tamper(body: dict = Body(default={}), conn=Depends(db.get_conn)):
 @app.post("/api/admin/restore-tamper")
 def restore_tamper(conn=Depends(db.get_conn)):
     """Restores the tampered record to its original pristine state and re-verifies the chain."""
-    row_id = db.get_setting(conn, "tampered_row_id")
-    if not row_id:
+    ids = [x for x in (db.get_setting(conn, "tampered_row_ids", "") or "").split(",") if x]
+    if not ids:
         v = db.verify_chain(conn)
         return {"restored": False, "message": "No active tamper record registered", "verification": v}
-    orig = db.get_setting(conn, "tamper_backup_" + row_id)
-    if orig is not None:
-        conn.execute("UPDATE action_history SET remarks=? WHERE id=?", (orig, int(row_id)))
-        db.set_setting(conn, "tampered_row_id", "")
-        conn.commit()
+    for row_id in ids:
+        orig = db.get_setting(conn, "tamper_backup_" + row_id)
+        if orig is not None:
+            conn.execute("UPDATE action_history SET remarks=? WHERE id=?", (orig, int(row_id)))
+    db.set_setting(conn, "tampered_row_ids", "")
+    conn.commit()
     events.publish("dashboard.invalidate", {})
     v = db.verify_chain(conn)
     return {"restored": True, "verification": v}
