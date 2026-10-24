@@ -1,11 +1,12 @@
 """Admin API routes."""
 from fastapi import APIRouter, Body, Depends, HTTPException
 from .. import db, events, seed, services, sla
+from ..roles import require_demo_admin
 
 router = APIRouter()
 
 
-@router.post("/api/simulate/complaint")
+@router.post("/api/simulate/complaint", dependencies=[Depends(require_demo_admin)])
 def simulate(body: dict = Body(default={}), conn=Depends(db.get_conn)):
     return services.simulate_complaint(conn, body.get("scenario"))
 
@@ -17,7 +18,7 @@ def verify(case_id: str = "", conn=Depends(db.get_conn)):
 
 
 
-@router.post("/api/admin/reset")
+@router.post("/api/admin/reset", dependencies=[Depends(require_demo_admin)])
 def reset():
     db.READY.wait(30)
     db.READY.clear()
@@ -34,7 +35,7 @@ def reset():
 
 
 
-@router.post("/api/admin/clock")
+@router.post("/api/admin/clock", dependencies=[Depends(require_demo_admin)])
 def clock(body: dict = Body(...), conn=Depends(db.get_conn)):
     """Time machine: advance the demo clock, then let the SLA engine react immediately."""
     off = int(db.get_setting(conn, "clock_offset_days", "0")) + int(body.get("add_days", 0))
@@ -47,7 +48,7 @@ def clock(body: dict = Body(...), conn=Depends(db.get_conn)):
 
 
 
-@router.post("/api/admin/tamper")
+@router.post("/api/admin/tamper", dependencies=[Depends(require_demo_admin)])
 def tamper(body: dict = Body(default={}), conn=Depends(db.get_conn)):
     """Demo only: alter a history record behind the application's back (raw UPDATE, no re-hash)."""
     case_id, seq = body.get("case_id"), int(body.get("seq") or 2)
@@ -74,7 +75,7 @@ def tamper(body: dict = Body(default={}), conn=Depends(db.get_conn)):
 
 
 
-@router.post("/api/admin/restore-tamper")
+@router.post("/api/admin/restore-tamper", dependencies=[Depends(require_demo_admin)])
 def restore_tamper(conn=Depends(db.get_conn)):
     """Restores the tampered record to its original pristine state and re-verifies the chain."""
     ids = [x for x in (db.get_setting(conn, "tampered_row_ids", "") or "").split(",") if x]

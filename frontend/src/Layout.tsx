@@ -33,6 +33,7 @@ export default function Layout() {
   const [demo, setDemo] = useState(false)
   const bellRef = useRef<HTMLDivElement>(null)
   const demoRef = useRef<HTMLDivElement>(null)
+  const canDemo = meta.data?.demo_mode === true && me.role === 'SENIOR'
 
   useEffect(() => {
     const h = (e: MouseEvent) => {
@@ -43,10 +44,10 @@ export default function Layout() {
     return () => document.removeEventListener('mousedown', h)
   }, [])
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'd') setDemo((v) => !v) }
+    const h = (e: KeyboardEvent) => { if (canDemo && e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'd') setDemo((v) => !v) }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [])
+  }, [canDemo])
 
   const counts: Record<string, number> = {
     overlaps: (overlaps.data?.items || []).filter((c: any) => c.status === 'OPEN').length,
@@ -165,10 +166,10 @@ export default function Layout() {
                 </select>)}
             </div>
 
-            <button onClick={simulate} disabled={busy}
+            {canDemo && <button onClick={simulate} disabled={busy}
               className="flex items-center gap-2 rounded-lg bg-saffron px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:brightness-95 disabled:opacity-60">
               <Zap size={16} className={busy ? 'animate-pulse' : ''} /> <span className="hidden lg:inline">Simulate New Complaint</span><span className="lg:hidden">Simulate</span>
-            </button>
+            </button>}
 
             <div className="relative" ref={bellRef}>
               <button onClick={() => setBell((v) => !v)} className="relative rounded-lg p-2 text-slate-600 hover:bg-slate-100">
@@ -199,7 +200,8 @@ export default function Layout() {
                 </div>)}
             </div>
 
-            <div className="relative" ref={demoRef}>
+            {!canDemo && <button onClick={verifyAll} className="rounded-lg border border-slate-200 px-2.5 py-2 text-sm text-slate-600">Verify audit trail</button>}
+            {canDemo && <div className="relative" ref={demoRef}>
               <button onClick={() => setDemo((v) => !v)}
                 className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
                 Demo <ChevronDown size={14} />
@@ -217,7 +219,7 @@ export default function Layout() {
 
                   <div className="px-3 pb-1.5 pt-1 text-[11px] text-slate-400">Shortcut: Ctrl+Shift+D · Viewing as {roleLabel}</div>
                 </div>)}
-            </div>
+            </div>}
           </div>
         </header>
         <main className="flex-1 overflow-auto p-6"><Outlet /></main>

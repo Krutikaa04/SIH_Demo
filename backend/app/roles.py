@@ -2,8 +2,9 @@
 
 Production would use AICTE SSO (e-Office) with RBAC/ABAC and MFA.
 """
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 
+from . import config
 from .constants import BUREAUS
 
 PERSONAS = {
@@ -65,3 +66,12 @@ def allowed_actions(ctx, case_bureau, case_region, status):
 
 def forbid(msg="Your role is not permitted to do this"):
     raise HTTPException(403, msg)
+
+
+def require_demo_admin(request: Request, ctx=Depends(get_ctx)):
+    """Hide demo mutations unless explicitly enabled for a Senior caller."""
+    if not config.demo_mode():
+        raise HTTPException(404, "Not found")
+    if ctx.role != "SENIOR" or request.headers.get("x-role", "").upper() != "SENIOR":
+        forbid("Only Senior Management can use demo controls")
+    return ctx

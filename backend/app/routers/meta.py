@@ -1,6 +1,6 @@
 """Meta API routes."""
 from fastapi import APIRouter, Depends
-from .. import db, roles, services
+from .. import config, db, roles, services
 from ..constants import BUREAUS, CATEGORIES, REGION_STATES, SLA_DAYS, STATUSES
 
 router = APIRouter()
@@ -12,7 +12,7 @@ def meta():
             "regions": [{"name": k, "states": v} for k, v in REGION_STATES.items()],
             "categories": [{"name": n, "group": g} for n, g in CATEGORIES], "statuses": STATUSES,
             "roles": [{"code": k, "label": v} for k, v in roles.ROLE_LABELS.items()],
-            "sources": services.SOURCES}
+            "sources": services.SOURCES, "demo_mode": config.demo_mode()}
 
 
 

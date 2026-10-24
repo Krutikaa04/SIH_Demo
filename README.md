@@ -97,3 +97,13 @@ stays off. A frontend build does not replace the type-check step.
 The frontend uses TypeScript 6, within typescript-eslint's supported peer range;
 the previous TypeScript 7 dependency cannot install with that parser. ESLint allows
 the six existing exhaustive-deps warnings and fails if the count increases.
+
+## Demo controls
+
+`python run.py` defaults `DEMO_MODE` to `1`; an explicit `DEMO_MODE=0` is respected.
+Direct `uvicorn app.main:app` deployments leave it off unless `DEMO_MODE=1` is set.
+Reset, clock advance, tamper, restore and simulated complaints return 404 while off,
+and require an explicit `X-Role: SENIOR` while on (403 otherwise). The UI displays
+these controls only for Senior Management in demo mode. Read-only audit verification
+remains available. These checks reuse the prototype role switcher; authenticated
+sessions are tracked separately in issue #22.

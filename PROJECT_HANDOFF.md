@@ -436,3 +436,13 @@ Regional and a non-participating Bureau. Card supports a rendered subtitle.
 TypeScript remains non-strict; existing Hooks dependency warnings are a tracked
 lint baseline rather than ignored errors. Build artifacts remain under the current
 committed-dist policy pending the team decision in issue #7.
+
+## Demo endpoint gate
+
+`config.demo_mode()` reads `DEMO_MODE=1`; the API defaults to disabled. `run.py`
+sets the default to enabled and preserves an explicit `0`. All five demo mutation
+routes share `roles.require_demo_admin`: 404 while disabled, 403 unless the caller
+explicitly supplies the Senior role. Missing/invalid role headers cannot inherit
+get_ctx's permissive default for these routes. `/api/meta` includes `demo_mode`;
+the UI hides mutation controls and their shortcut for other sessions. Audit verify
+remains read-only and available. This gate is not authentication; issue #22 owns it.
