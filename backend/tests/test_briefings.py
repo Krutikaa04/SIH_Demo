@@ -53,6 +53,19 @@ def actions(conn):
     return briefings.generate_executive_briefing(conn)["action_agenda"]
 
 
+def test_fresh_seed_has_an_actionable_agenda_without_preexisting_rooms(conn):
+    result = briefings.generate_executive_briefing(conn)
+    assert result["active_rooms"] == conn.execute(
+        "SELECT COUNT(*) FROM coordination_rooms WHERE status='OPEN'").fetchone()[0]
+    overlap_reviews = [item for item in result["action_agenda"] if item["kind"] == "REVIEW_OVERLAP"]
+    assert overlap_reviews
+    for review in overlap_reviews:
+        case_ids = [item["label"] for item in review["evidence"] if item["kind"] == "case"]
+        assert len(case_ids) >= 2
+        assert all(db.one(conn, "SELECT status FROM cases WHERE case_id=?", (cid,))["status"] != "Disposed"
+                   for cid in case_ids)
+
+
 def test_prioritizes_overdue_coordination_then_due_soon_then_other_reviews(briefing_db):
     conn = briefing_db
     institution(conn)
@@ -162,6 +175,14 @@ def test_completed_cases_and_inactive_pair_reviews_are_excluded(briefing_db):
     assert actions(conn) == []
 
 
+@pytest.mark.parametrize("status", ["RESOLVED", "DISMISSED", "REJECTED"])
+def test_inactive_cluster_pairs_do_not_reopen_coordination_work(briefing_db, status):
+    conn = briefing_db
+    institution(conn)
+    pair(conn, "CL-DONE", case(conn, "RB/2026/A"), case(conn, "LC/2026/B", bureau="LC"), status=status)
+    assert actions(conn) == []
+
+
 def test_regional_api_excludes_other_regions_from_every_count_action_and_citation(briefing_db, client, as_role):
     conn = briefing_db
     institution(conn)
@@ -187,6 +208,9 @@ def test_regional_api_excludes_other_regions_from_every_count_action_and_citatio
                 assert evidence["label"] == western
     assert "[RB/2026/WEST]" in result["citations"]
     assert client.get("/api/briefings/executive", headers=as_role("SENIOR")).json()["total_cases"] == 3
+    empty_region = client.get("/api/briefings/executive", headers=as_role("REGIONAL", "Eastern")).json()
+    assert empty_region["total_cases"] == empty_region["active_rooms"] == 0
+    assert empty_region["citations"] == {} and empty_region["action_agenda"] == []
 
 
 @pytest.mark.parametrize("region", ["", "Unknown", "western"])
