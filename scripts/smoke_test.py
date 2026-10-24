@@ -163,4 +163,4 @@ if __name__ == "__main__":
     finally:
         call("/admin/reset", "POST")
     print("\n" + ("ALL CHECKS PASSED" if not failures else f"{len(failures)} FAILED: {failures}"))
-    sys.exit(1)
+    sys.exit(1 if failures else 0)
