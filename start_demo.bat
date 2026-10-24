@@ -16,5 +16,5 @@ if errorlevel 1 (
     python -m pip install -r requirements.txt
   )
 )
-python run.py
+python run.py %*
 pause

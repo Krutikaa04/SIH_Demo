@@ -1,4 +1,5 @@
 """Run the demo smoke suite against an isolated launcher process, then stop it."""
+import argparse
 import os
 from pathlib import Path
 import subprocess
@@ -30,10 +31,18 @@ def wait_for_server(server, timeout=30):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--batch", action="store_true", help="Verify the Windows batch launcher")
+    args = parser.parse_args()
+    if args.batch and os.name != "nt":
+        parser.error("--batch requires Windows")
     with tempfile.TemporaryDirectory(prefix="sih-ci-") as temporary:
         env = dict(os.environ, AICTE_DB=str(Path(temporary) / "demo.db"), DEMO_MODE="1")
-        with (Path(temporary) / "server.log").open("w+") as log:
-            server = subprocess.Popen([sys.executable, "run.py", "--no-browser"], cwd=ROOT,
+        if args.batch:
+            env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
+        command = ["cmd", "/c", "start_demo.bat", "--no-browser"] if args.batch else [sys.executable, "run.py", "--no-browser"]
+        with (Path(temporary) / "server.log").open("w+", encoding="utf-8") as log:
+            server = subprocess.Popen(command, cwd=ROOT,
                                       env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log)
             try:
                 wait_for_server(server)
@@ -45,7 +54,11 @@ def main():
                 print(log.read(), file=sys.stderr)
                 raise
             finally:
-                server.terminate()
+                if args.batch and server.poll() is None:
+                    subprocess.run(["taskkill", "/PID", str(server.pid), "/T", "/F"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                else:
+                    server.terminate()
                 try:
                     server.wait(timeout=10)
                 except subprocess.TimeoutExpired:
