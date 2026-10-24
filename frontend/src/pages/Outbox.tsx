@@ -2,12 +2,12 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Mail, MessageSquare, Send, ShieldCheck, Clock, User, Eye, ArrowUpRight, CheckCircle2 } from 'lucide-react'
 import { useApi } from '../api'
-import { Card, Drawer, ErrorBox, Loading, ago, cx, fmtTs } from '../ui'
+import { Card, Drawer, ErrorBox, Loading, PageHeader, ago, cx, fmtTs } from '../ui'
 
 const CHANNELS = [
-  ['', 'All Channels'],
+  ['', 'Everything'],
   ['email', 'Email'],
-  ['sms', 'SMS'],
+  ['sms', 'Text messages'],
 ]
 
 export default function Outbox() {
@@ -18,49 +18,18 @@ export default function Outbox() {
   const items = data?.items || []
 
   return (
-    <div className="mx-auto max-w-[1200px] space-y-4">
-      {/* Header */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold tracking-tight text-slate-900">Simulated Outbox</h1>
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
-              <ShieldCheck size={12} />
-              SIMULATED · OFFLINE
-            </span>
-          </div>
-          <p className="mt-1 text-sm text-slate-500">
-            Dispatch archive for grievance reminders and escalation notices. Operates strictly offline without external network transmission.
-          </p>
-        </div>
+    <div className="mx-auto max-w-[1200px]">
+      <PageHeader eyebrow="Sent messages" title="Messages the system has prepared"
+        subtitle="Every reminder and escalation notice, whether an officer asked for it or the deadline engine did. In this prototype nothing leaves the computer."
+        actions={<>
+          <span className="inline-flex items-center gap-1 rounded-[4px] border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-bold uppercase tracking-wider text-amber-700"><ShieldCheck size={12} /> Practice only</span>
+          <Link to="/alerts" className="btn btn-ghost"><Send size={14} /> Send one from Alerts</Link>
+        </>} />
 
-        <div className="flex items-center gap-2">
-          <Link
-            to="/alerts"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-          >
-            <Send size={14} className="text-navy" />
-            Go to Alerts to dispatch
-          </Link>
-        </div>
-      </div>
-
-      {/* Filter Tabs */}
-      <div className="flex flex-wrap gap-2">
+      <div className="mb-4 flex flex-wrap gap-2" role="tablist" aria-label="Channel">
         {CHANNELS.map(([v, l]) => (
-          <button
-            key={v}
-            onClick={() => setChannel(v)}
-            className={cx(
-              'rounded-full px-3.5 py-1.5 text-sm font-medium transition',
-              channel === v
-                ? 'bg-navy text-white shadow-sm'
-                : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'
-            )}
-          >
-            {l}
-          </button>
-        ))}
+          <button key={v} role="tab" aria-selected={channel === v} onClick={() => setChannel(v)}
+            className={cx('rounded-full border px-3.5 py-1.5 text-sm font-semibold transition', channel === v ? 'border-navy bg-navy text-white' : 'border-line bg-sheet text-slate-600 hover:border-slate-300 hover:text-slate-900')}>{l}</button>))}
       </div>
 
       {/* Outbox List Card */}
@@ -84,13 +53,13 @@ export default function Outbox() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="border-b border-slate-100 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              <thead className="border-b border-slate-100 bg-slate-50 eyebrow">
                 <tr>
                   <th className="px-4 py-3">Channel</th>
                   <th className="px-4 py-3">Recipient</th>
-                  <th className="px-4 py-3">Subject / Summary</th>
-                  <th className="px-4 py-3">Dispatched At</th>
-                  <th className="px-4 py-3">Triggered By</th>
+                  <th className="px-4 py-3">Subject</th>
+                  <th className="px-4 py-3">When</th>
+                  <th className="px-4 py-3">Started by</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3 text-right">View</th>
                 </tr>
@@ -208,7 +177,7 @@ export default function Outbox() {
                 <span className="mt-0.5 font-bold text-slate-800">{selectedItem.recipient_role}</span>
               </div>
               <div className="rounded-lg border border-slate-100 bg-slate-50 p-2.5">
-                <span className="block text-[10px] font-semibold uppercase text-slate-400">Dispatched At</span>
+                <span className="block text-[10px] font-semibold uppercase text-slate-400">When</span>
                 <span className="mt-0.5 font-medium text-slate-700">{fmtTs(selectedItem.created_at)}</span>
               </div>
               <div className="rounded-lg border border-slate-100 bg-slate-50 p-2.5">
