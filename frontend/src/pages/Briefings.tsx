@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowUpRight, CheckCircle2, ListChecks, Printer } from 'lucide-react'
-import { useApi } from '../api'
+import { useApi, useRole } from '../api'
 import { Card, EmptyState, ErrorBox, Loading, PageHeader, cx } from '../ui'
 
 type Evidence = { kind: string; label: string; url: string }
@@ -19,6 +19,7 @@ type AgendaItem = {
 type Briefing = {
   generated_at: string
   scope: string
+  region: string
   total_cases: number
   pending_cases: number
   overdue_cases: number
@@ -74,10 +75,12 @@ function ActionItem({ action, hidden }: { action: AgendaItem; hidden?: boolean }
 
 export default function Briefings() {
   const { data: briefing, loading, error } = useApi<Briefing>('/briefings/executive')
+  const role = useRole()
   const [showAll, setShowAll] = useState(false)
   if (loading && !briefing) return <Loading />
   if (error) return <ErrorBox msg={error} />
-  if (!briefing) return <Loading />
+  const expectedRegion = role.role === 'REGIONAL' ? role.region : ''
+  if (!briefing || (role.role === 'REGIONAL' && !role.region) || briefing.region !== expectedRegion) return <Loading />
   const actions = briefing.action_agenda || []
   const figures = [
     { label: 'Complaints received', value: briefing.total_cases, tone: 'text-paper' },

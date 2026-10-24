@@ -192,6 +192,7 @@ def generate_executive_briefing(conn, ctx=None):
             citations[f"[{evidence['label']}]"] = evidence["url"]
     return {
         "generated_at": date_str, "as_of": db.iso(now_dt), "scope": scope,
+        "region": ctx.region if regional else "",
         "total_cases": len(cases), "pending_cases": len(pending), "overdue_cases": len(overdue),
         "overdue_rate": overdue_rate, "active_rooms": len(open_rooms), "sections": sections, "citations": citations,
         "action_agenda": agenda,

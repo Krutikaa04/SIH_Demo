@@ -57,6 +57,7 @@ def test_fresh_seed_has_an_actionable_agenda_without_preexisting_rooms(conn):
     result = briefings.generate_executive_briefing(conn)
     assert result["active_rooms"] == conn.execute(
         "SELECT COUNT(*) FROM coordination_rooms WHERE status='OPEN'").fetchone()[0]
+    assert result["region"] == ""
     overlap_reviews = [item for item in result["action_agenda"] if item["kind"] == "REVIEW_OVERLAP"]
     assert overlap_reviews
     for review in overlap_reviews:
@@ -198,6 +199,7 @@ def test_regional_api_excludes_other_regions_from_every_count_action_and_citatio
     assert response.status_code == 200
     result = response.json()
     assert result["scope"] == "Western region"
+    assert result["region"] == "Western"
     assert result["total_cases"] == result["pending_cases"] == result["active_rooms"] == 1
     assert result["overdue_cases"] == 0
     serialized = json.dumps(result)
@@ -210,6 +212,7 @@ def test_regional_api_excludes_other_regions_from_every_count_action_and_citatio
     assert client.get("/api/briefings/executive", headers=as_role("SENIOR")).json()["total_cases"] == 3
     empty_region = client.get("/api/briefings/executive", headers=as_role("REGIONAL", "Eastern")).json()
     assert empty_region["total_cases"] == empty_region["active_rooms"] == 0
+    assert empty_region["region"] == "Eastern"
     assert empty_region["citations"] == {} and empty_region["action_agenda"] == []
 
 
