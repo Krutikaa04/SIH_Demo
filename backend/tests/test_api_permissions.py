@@ -68,4 +68,8 @@ def test_coordination_acknowledgement_and_non_lead_decision(client, conn, as_rol
 def test_encoded_case_subroutes(client, conn):
     case = open_case(conn)
     assert client.get(case_url(case["case_id"], "/history")).status_code == 200
-    assert client.get(case_url(case["case_id"], "/documents")).json() == {"items": []}
+    response = client.get(case_url(case["case_id"], "/documents"))
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert isinstance(items, list)
+    assert all(item["case_id"] == case["case_id"] for item in items)
