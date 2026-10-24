@@ -177,6 +177,20 @@ def test_csv_exports_the_same_metrics_and_scoped_room_evidence(client, as_role, 
     assert item["id"] not in hidden.text
 
 
+@pytest.mark.parametrize("prefix", ["=", "+", "-", "@", " \t=", "\r@", "\n+", "\x00="])
+def test_csv_neutralizes_formula_prefixes_in_room_evidence(client, as_role, hero, conn, prefix):
+    item = room(client, as_role, hero, "MERGE")
+    value = prefix + "1+1"
+    conn.execute("UPDATE coordination_rooms SET lead_bureau=? WHERE id=?", (value, item["id"]))
+    conn.commit()
+    response = client.get("/api/reports/coordination?format=csv", headers=as_role("SENIOR"))
+    assert response.status_code == 200
+    rows = list(csv.reader(io.StringIO(response.text.lstrip("\ufeff"))))
+    evidence = next(row for row in rows if row and row[0] == item["id"])
+    assert evidence[2] == "'" + value
+    assert evidence[4] == "3"
+
+
 @pytest.mark.parametrize("decision", [None, ""])
 @pytest.mark.parametrize("status", ["MERGED", "RESOLVED"])
 def test_completed_rooms_without_decision_records_need_attention(client, as_role, hero, conn, status, decision):

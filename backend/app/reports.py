@@ -1,5 +1,6 @@
 """Report builders (Bureau-wise, region-wise, institution-wise, ageing, disposal, overlaps, periodic) + briefing."""
 import csv
+import re
 import io
 from datetime import date, datetime, timedelta
 
@@ -313,25 +314,29 @@ def _periodic(conn, ctx, rows, today, period="month"):
 def to_csv(rep):
     buf = io.StringIO()
     w = csv.writer(buf)
+    def write_row(values):
+        w.writerow(["'" + value if isinstance(value, str) and re.match(r"^[\s\x00-\x1f]*[=+@-]", value)
+                    else value for value in values])
+
     filter_parts = [f"{k}={v}" for k, v in rep.get("filters", {}).items() if v]
     header = [rep["title"], rep["scope"]]
     if filter_parts:
         header.append("Filters: " + ", ".join(filter_parts))
     header.extend(["Generated " + rep["generated_at"], "SYNTHETIC DATA - PROTOTYPE"])
-    w.writerow(header)
-    w.writerow([c["label"] for c in rep["columns"]])
+    write_row(header)
+    write_row([c["label"] for c in rep["columns"]])
     for r in rep["rows"]:
-        w.writerow([r.get(c["key"], "") for c in rep["columns"]])
+        write_row([r.get(c["key"], "") for c in rep["columns"]])
     if rep.get("kind") == "coordination":
-        w.writerow([])
-        w.writerow(["Counting method", rep["methodology"]])
-        w.writerow(["Pair review evidence", "Latest decision", "Officer", "Recorded at", "Case A", "Case B", "Audit action"])
+        write_row([])
+        write_row(["Counting method", rep["methodology"]])
+        write_row(["Pair review evidence", "Latest decision", "Officer", "Recorded at", "Case A", "Case B", "Audit action"])
         for review in rep["reviews"]:
-            w.writerow([review["pair_id"], review["decision"], review["reviewed_by"], review["reviewed_at"],
+            write_row([review["pair_id"], review["decision"], review["reviewed_by"], review["reviewed_at"],
                         review["case_a"], review["case_b"], review["audit_action_id"]])
-        w.writerow(["Room evidence", "Institution", "Lead bureau", "Outcome", "Selected cases", "Pending followers", "Overdue followers", "Decision days", "Case IDs"])
+        write_row(["Room evidence", "Institution", "Lead bureau", "Outcome", "Selected cases", "Pending followers", "Overdue followers", "Decision days", "Case IDs"])
         for room in rep["evidence"]:
-            w.writerow([room["room_id"], room["institution"], room["lead_bureau"], room["outcome"] or room["status"],
+            write_row([room["room_id"], room["institution"], room["lead_bureau"], room["outcome"] or room["status"],
                         room["selected_cases"], room["pending_followers"], room["overdue_followers"],
                         room["decision_days"], "; ".join(c["label"] for c in room["cases"])])
     return "\ufeff" + buf.getvalue()

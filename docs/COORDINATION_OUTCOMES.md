@@ -29,6 +29,8 @@ The CSV contains metric definitions plus scoped review/room evidence. Case links
 open the actual case history; room links open the recorded decision. PDF uses the
 existing metric-table export. UI rendering and export buttons wait for the response
 matching the active report, filters and regional scope.
+CSV string cells with spreadsheet formula prefixes are escaped, including prefixes
+after leading whitespace or control characters; numeric measurements stay numeric.
 
 The former Effort saved calculator remains accessible as **Workload scenario**.
 It explicitly assumes all-pairs manual review and a user-selected candidate
