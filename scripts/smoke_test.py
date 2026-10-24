@@ -99,6 +99,13 @@ def flow(round_no):
           f"({sim['overlaps'][0]['score']}% in {ms:.0f} ms)" if s == 200 and sim["overlaps"] else "")
     _, a1, _ = call("/alerts?unread=1")
     check("alert raised", a1["unread"] > a0["unread"])
+    _, a_pg, _ = call("/alerts?limit=400", role="PGRC")
+    _, a_all, _ = call("/alerts?limit=400", role="SENIOR")
+    check("alerts are role-targeted: PGRC sees only PGRC-addressed or untargeted alerts",
+          all((not x["target_bureaus"]) or "PGRC" in x["target_bureaus"] for x in a_pg["items"]))
+    check("Senior Management sees more alerts than a single Bureau", len(a_all["items"]) > len(a_pg["items"]))
+    check("PGRC unread count matches its own visible list",
+          a_pg["unread"] == sum(1 for x in a_pg["items"] if not x["read"]))
 
     _, desk, _ = call("/dashboard/summary", role="PGRC")
     check("PGRC sees 'My desk'", desk["desk"] and desk["desk"]["bureau"] == "PGRC")

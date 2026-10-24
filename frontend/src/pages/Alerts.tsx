@@ -15,7 +15,7 @@ import {
   ArrowRight,
 } from 'lucide-react'
 import { post, useApi, api, useRole } from '../api'
-import { Card, Drawer, ErrorBox, Loading, ago, cx } from '../ui'
+import { BureauBadge, Card, Drawer, ErrorBox, Loading, ago, cx } from '../ui'
 
 const TABS = [
   ['', 'All'],
@@ -167,6 +167,11 @@ export default function Alerts() {
                       <span className="block truncate text-xs text-slate-500 mt-0.5">
                         {[a.institution_name, a.case_id].filter(Boolean).join(' · ')}
                       </span>
+                      {(a.target_bureaus || []).length > 0 && (
+                        <span className="mt-1 flex flex-wrap items-center gap-1" title="Bureaus this alert is addressed to">
+                          {a.target_bureaus.map((b: string) => <BureauBadge key={b} code={b} />)}
+                        </span>
+                      )}
                     </span>
                     <span className="shrink-0 text-xs text-slate-400 mr-2">{ago(a.created_at)}</span>
                   </Link>

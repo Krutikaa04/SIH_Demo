@@ -208,10 +208,10 @@ def case_action(case_id: str, body: dict = Body(...), conn=Depends(db.get_conn),
         conn.execute("UPDATE cases SET pingpong_at=? WHERE case_id=?", (stamp, case_id))
         services.create_alert(conn, "PING_PONG", "MEDIUM",
                               f"{case_id} has been transferred {upd['transfer_count']} times — possible ping-pong; fix ownership",
-                              case_id, c["institution_id"])
+                              case_id, c["institution_id"], target_bureaus=[c["bureau_code"], upd["bureau_code"]])
     if kind == "escalate":
         services.create_alert(conn, "ESCALATION", "HIGH", f"{case_id} escalated to {boss['designation']}",
-                              case_id, c["institution_id"])
+                              case_id, c["institution_id"], target_bureaus=[c["bureau_code"]])
     conn.commit()
     events.publish("case.updated", {"case_id": case_id})
     events.publish("dashboard.invalidate", {})
@@ -574,29 +574,37 @@ def decide(room_id: str, body: dict = Body(...), conn=Depends(db.get_conn), ctx=
 
 @app.get("/api/alerts")
 def alerts(unread: int = 0, type: str = "", limit: int = 100, conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
-    where, params = [], []
+    """Alerts visible to the caller's role (see services.alert_filter). `unread` counts ALL visible unread alerts."""
+    base, base_params = services.alert_filter(ctx)
+    unread_sql, unread_params = services.unread_filter(ctx.role)
+    where, params = list(base), list(base_params)
     if unread:
-        where.append("is_read=0")
+        where.append(unread_sql)
+        params += unread_params
     if type:
-        where.append("type=?"); params.append(type)
+        where.append("type=?")
+        params.append(type)
     w = ("WHERE " + " AND ".join(where)) if where else ""
-    rows = db.rows(conn, f"SELECT * FROM alerts {w} ORDER BY created_at DESC, id DESC LIMIT ?", (*params, 400))
-    items = [services.alert_view(conn, a) for a in rows]
-    if ctx.role == "REGIONAL":
-        reg = {r["aicte_id"]: r["region"] for r in db.rows(conn, "SELECT aicte_id,region FROM institutions")}
-        items = [a for a in items if a["institution_id"] and reg.get(a["institution_id"]) == ctx.region]
-    return {"items": items[:limit], "unread": sum(1 for a in items if not a["read"])}
+    rows = db.rows(conn, f"SELECT * FROM alerts {w} ORDER BY created_at DESC, id DESC LIMIT ?",
+                   (*params, max(1, min(limit, 400))))
+    count_where = " AND ".join(base + [unread_sql])
+    total_unread = conn.execute(f"SELECT COUNT(*) FROM alerts WHERE {count_where}",
+                                (*base_params, *unread_params)).fetchone()[0]
+    return {"items": [services.alert_view(conn, a, role=ctx.role) for a in rows], "unread": total_unread}
 
 
 @app.post("/api/alerts/{alert_id}/read")
-def read_alert(alert_id: int, conn=Depends(db.get_conn)):
-    conn.execute("UPDATE alerts SET is_read=1 WHERE id=?", (alert_id,))
+def read_alert(alert_id: int, conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    alert = db.one(conn, "SELECT * FROM alerts WHERE id=?", (alert_id,))
+    if not alert or not services.alert_visible(conn, ctx, alert):
+        raise HTTPException(404, "Alert not found")
+    services.mark_alerts_read(conn, ctx, alert_id)
     return {"ok": True}
 
 
 @app.post("/api/alerts/read-all")
-def read_all(conn=Depends(db.get_conn)):
-    conn.execute("UPDATE alerts SET is_read=1")
+def read_all(conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    services.mark_alerts_read(conn, ctx)  # only the alerts this role can see, and only for this role
     return {"ok": True}
 
 
@@ -608,6 +616,8 @@ def dispatch_alert_reminder(alert_id: int, body: dict = Body(default={}),
     alert = db.one(conn, "SELECT * FROM alerts WHERE id=?", (alert_id,))
     if not alert:
         raise HTTPException(404, "Alert not found")
+    if not services.alert_visible(conn, ctx, alert):
+        raise HTTPException(403, "This alert is not addressed to your role")
     if ctx.role in BUREAUS:
         if alert["case_id"]:
             c = db.one(conn, "SELECT bureau_code FROM cases WHERE case_id=?", (alert["case_id"],))
@@ -632,6 +642,8 @@ def preview_alert_reminder(alert_id: int, channel: str = "email",
     alert = db.one(conn, "SELECT * FROM alerts WHERE id=?", (alert_id,))
     if not alert:
         raise HTTPException(404, "Alert not found")
+    if not services.alert_visible(conn, ctx, alert):
+        raise HTTPException(403, "This alert is not addressed to your role")
     if ctx.role in BUREAUS:
         if alert["case_id"]:
             c = db.one(conn, "SELECT bureau_code FROM cases WHERE case_id=?", (alert["case_id"],))

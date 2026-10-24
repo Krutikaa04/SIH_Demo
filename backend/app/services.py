@@ -192,21 +192,67 @@ def next_case_number(conn, bureau, year):
 
 
 def create_alert(conn, type_, severity, message, case_id=None, institution_id=None, pair_id=None,
-                 cluster_id=None, created_at=None):
+                 cluster_id=None, created_at=None, target_bureaus=None):
+    """Create an alert. `target_bureaus` = Bureau codes the alert concerns (empty = visible to everyone)."""
     cur = conn.execute(
-        "INSERT INTO alerts(type,severity,case_id,institution_id,pair_id,cluster_id,message,created_at,is_read) "
-        "VALUES(?,?,?,?,?,?,?,?,0)",
+        "INSERT INTO alerts(type,severity,case_id,institution_id,pair_id,cluster_id,message,created_at,is_read,"
+        "target_bureaus) VALUES(?,?,?,?,?,?,?,?,0,?)",
         (type_, severity, case_id, institution_id, pair_id, cluster_id, message,
-         created_at or db.iso(db.now(conn))))
+         created_at or db.iso(db.now(conn)), db.fmt_targets(target_bureaus)))
     return cur.lastrowid
 
 
-def alert_view(conn, a):
+# ---- alert visibility (issue #12) ---------------------------------------------------------
+# Matrix: SENIOR sees every alert. A Bureau role (RB, PGRC, AB, LC, VIG) sees alerts whose target_bureaus contains
+# its code, plus untargeted ("global"/legacy) alerts. REGIONAL sees alerts about institutions in its region.
+# Read state is tracked per role (read_roles), so one Bureau reading a shared alert does not clear it for another.
+
+def alert_filter(ctx):
+    """(where_fragments, params) limiting the alerts table to what `ctx` may see."""
+    if ctx.role == "SENIOR":
+        return [], []
+    if ctx.role == "REGIONAL":
+        return ["institution_id IN (SELECT aicte_id FROM institutions WHERE region=?)"], [ctx.region]
+    return ["(target_bureaus IS NULL OR target_bureaus='' OR target_bureaus LIKE ?)"], [f"%,{ctx.role},%"]
+
+
+def unread_filter(role):
+    """(fragment, params): not read globally (legacy/seed) and not read by this role."""
+    return "(is_read=0 AND (read_roles IS NULL OR read_roles NOT LIKE ?))", [f"%,{role},%"]
+
+
+def alert_visible(conn, ctx, alert):
+    if ctx.role == "SENIOR":
+        return True
+    if ctx.role == "REGIONAL":
+        inst = db.one(conn, "SELECT region FROM institutions WHERE aicte_id=?", (alert["institution_id"],)) \
+            if alert["institution_id"] else None
+        return bool(inst and inst["region"] == ctx.region)
+    targets = db.parse_targets(alert.get("target_bureaus"))
+    return not targets or ctx.role in targets
+
+
+_MARK_READ = ("read_roles = CASE WHEN read_roles IS NULL OR read_roles = '' THEN ',' || ? || ',' "
+              "WHEN read_roles LIKE ? THEN read_roles ELSE read_roles || ? || ',' END")
+
+
+def mark_alerts_read(conn, ctx, alert_id=None):
+    """Mark one alert (or every alert visible to the role) as read FOR THIS ROLE ONLY."""
+    where, params = alert_filter(ctx)
+    if alert_id is not None:
+        where, params = where + ["id=?"], params + [alert_id]
+    w = ("WHERE " + " AND ".join(where)) if where else ""
+    conn.execute(f"UPDATE alerts SET {_MARK_READ} {w}", (ctx.role, f"%,{ctx.role},%", ctx.role, *params))
+
+
+def alert_view(conn, a, role=None):
     inst = db.one(conn, "SELECT name FROM institutions WHERE aicte_id=?", (a["institution_id"],)) if a["institution_id"] else None
     return {"id": a["id"], "type": a["type"], "severity": a["severity"], "message": a["message"],
             "case_id": a["case_id"], "institution_id": a["institution_id"],
             "institution_name": inst["name"] if inst else None, "pair_id": a["pair_id"],
-            "cluster_id": a["cluster_id"], "created_at": a["created_at"], "read": bool(a["is_read"]),
+            "cluster_id": a["cluster_id"], "created_at": a["created_at"],
+            "read": bool(a["is_read"]) or bool(role and f",{role}," in (a.get("read_roles") or "")),
+            "target_bureaus": db.parse_targets(a.get("target_bureaus")),
             "link": a.get("link") or (f"/overlaps?open={a['cluster_id']}" if a["type"] == "OVERLAP" and a["cluster_id"]
                                       else f"/cases/{a['case_id']}" if a["case_id"] else "/alerts")}
 
@@ -276,17 +322,23 @@ def resolve_institution(reg, d):
 
 def _finish_case(conn, case_id, pairs, notify=True):
     """Alerts + push events for freshly detected overlap pairs. Returns the created alert ids."""
-    alert_ids = []
+    alert_ids, targets = [], {}
     for p in pairs:
         cl = db.one(conn, "SELECT cluster_id FROM overlap_pairs WHERE id=?", (p["id"],))["cluster_id"]
         sev = "HIGH" if p["band"] == "HIGH" else "MEDIUM"
-        alert_ids.append(create_alert(conn, "OVERLAP", sev, p["headline"], case_id, p["institution_id"], p["id"], cl))
+        # an overlap concerns the Bureaus of BOTH cases
+        targets[p["id"]] = sorted({r["bureau_code"] for r in conn.execute(
+            "SELECT bureau_code FROM cases WHERE case_id IN (?,?)", (p["case_a"], p["case_b"]))})
+        alert_ids.append(create_alert(conn, "OVERLAP", sev, p["headline"], case_id, p["institution_id"], p["id"], cl,
+                                      target_bureaus=targets[p["id"]]))
     conn.commit()
     if notify:
         events.publish("case.created", {"case_id": case_id})
         for p in pairs:
+            inst = db.one(conn, "SELECT region FROM institutions WHERE aicte_id=?", (p["institution_id"],))
             events.publish("overlap.detected", {"pair_id": p["id"], "score": p["score"], "band": p["band"],
-                                                "case_id": case_id, "institution_id": p["institution_id"]})
+                                                "case_id": case_id, "institution_id": p["institution_id"],
+                                                "targets": targets[p["id"]], "region": inst["region"] if inst else None})
         for aid in alert_ids:
             events.publish("alert.created", alert_view(conn, db.one(conn, "SELECT * FROM alerts WHERE id=?", (aid,))))
         events.publish("dashboard.invalidate", {})
