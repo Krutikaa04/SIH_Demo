@@ -422,24 +422,26 @@ def seed(conn):
         a = db.one(conn, "SELECT bureau_code FROM cases WHERE case_id=?", (p["case_a"],))
         b = db.one(conn, "SELECT bureau_code FROM cases WHERE case_id=?", (p["case_b"],))
         sev = "HIGH" if p["band"] == "HIGH" else "MEDIUM"
-        conn.execute("INSERT INTO alerts(type,severity,case_id,institution_id,pair_id,cluster_id,message,created_at,is_read)"
-                     " VALUES('OVERLAP',?,?,?,?,?,?,?,?)",
-                     (sev, p["case_a"], p["institution_id"], p["id"], cid, p["headline"], db.iso(ts), 1 if n > 5 else 0))
+        conn.execute("INSERT INTO alerts(type,severity,case_id,institution_id,pair_id,cluster_id,message,created_at,is_read,"
+                     "target_bureaus) VALUES('OVERLAP',?,?,?,?,?,?,?,?,?)",
+                     (sev, p["case_a"], p["institution_id"], p["id"], cid, p["headline"], db.iso(ts), 1 if n > 5 else 0,
+                      db.fmt_targets([a["bureau_code"], b["bureau_code"]])))
     overdue = db.rows(conn, "SELECT case_id,institution_id,due_date,bureau_code FROM cases "
                             "WHERE status!='Disposed' AND due_date<? ORDER BY due_date LIMIT 8", (str(today),))
     for n, c in enumerate(overdue):
-        conn.execute("INSERT INTO alerts(type,severity,case_id,institution_id,message,created_at,is_read) "
-                     "VALUES('SLA_BREACH','HIGH',?,?,?,?,?)",
+        conn.execute("INSERT INTO alerts(type,severity,case_id,institution_id,message,created_at,is_read,target_bureaus) "
+                     "VALUES('SLA_BREACH','HIGH',?,?,?,?,?,?)",
                      (c["case_id"], c["institution_id"], f"{c['case_id']} is beyond its prescribed timeline "
-                      f"(due {c['due_date']})", db.iso(now_dt - timedelta(hours=3 + n * 9)), 1))
-    near = db.rows(conn, "SELECT case_id,institution_id,due_date FROM cases WHERE status!='Disposed' AND due_date>=? "
+                      f"(due {c['due_date']})", db.iso(now_dt - timedelta(hours=3 + n * 9)), 1,
+                      db.fmt_targets([c["bureau_code"]])))
+    near = db.rows(conn, "SELECT case_id,institution_id,due_date,bureau_code FROM cases WHERE status!='Disposed' AND due_date>=? "
                          "AND (julianday(?)-julianday(received_on))*1.0/sla_days>=0.75 ORDER BY due_date LIMIT 6",
                    (str(today), str(today)))
     for n, c in enumerate(near):
-        conn.execute("INSERT INTO alerts(type,severity,case_id,institution_id,message,created_at,is_read) "
-                     "VALUES('SLA_NEAR','MEDIUM',?,?,?,?,?)",
+        conn.execute("INSERT INTO alerts(type,severity,case_id,institution_id,message,created_at,is_read,target_bureaus) "
+                     "VALUES('SLA_NEAR','MEDIUM',?,?,?,?,?,?)",
                      (c["case_id"], c["institution_id"], f"{c['case_id']} is nearing its timeline (due {c['due_date']})",
-                      db.iso(now_dt - timedelta(hours=5 + n * 8)), 1))
+                      db.iso(now_dt - timedelta(hours=5 + n * 8)), 1, db.fmt_targets([c["bureau_code"]])))
     _seed_documents(conn, rng, now_dt)
     sla_engine.init_state(conn)
     db.set_setting(conn, "sim_counter", "0")
