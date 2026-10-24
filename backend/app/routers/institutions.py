@@ -54,4 +54,3 @@ def get_institution(aicte_id: str, conn=Depends(db.get_conn), ctx=Depends(get_ct
             "stats": {"total": len(cases), "open": len(open_cases),
                       "overdue": sum(1 for c in open_cases if c["sla"]["state"] == "BREACHED"),
                       "bureaus_involved": sorted({c["bureau"] for c in open_cases})}}
-

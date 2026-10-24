@@ -90,4 +90,3 @@ def restore_tamper(conn=Depends(db.get_conn)):
     events.publish("dashboard.invalidate", {})
     v = db.verify_chain(conn)
     return {"restored": True, "verification": v}
-

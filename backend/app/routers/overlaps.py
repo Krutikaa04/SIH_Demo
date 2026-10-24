@@ -69,4 +69,3 @@ def review_overlap_pair(pair_id: str, body: dict = Body(...), conn=Depends(db.ge
     conn.commit()
     events.publish("dashboard.invalidate", {})
     return {"ok": True, "pair_id": pair_id, "status": decision, "review_rationale": rationale, "review_by": actor_name, "review_at": now_iso}
-

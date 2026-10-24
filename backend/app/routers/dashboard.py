@@ -113,4 +113,3 @@ def dashboard(conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
                                             "track avoided by a coordinated decision."},
             "workload": workload, "top_institutions": top_institutions, "trend": trend, "ageing": ageing,
             "regions": regions, "activity": activity}
-

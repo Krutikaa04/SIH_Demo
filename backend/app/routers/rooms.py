@@ -130,4 +130,3 @@ def decide(room_id: str, body: dict = Body(...), conn=Depends(db.get_conn), ctx=
     events.publish("room.updated", {"room_id": room_id})
     events.publish("dashboard.invalidate", {})
     return _room_view(conn, room_id)
-

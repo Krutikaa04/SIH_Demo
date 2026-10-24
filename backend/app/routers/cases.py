@@ -142,4 +142,3 @@ def get_case(case_id: str, conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
         room = db.one(conn, "SELECT id,lead_bureau,status FROM coordination_rooms WHERE id=?", (c["room_id"],))
         case["room"] = room
     return case
-

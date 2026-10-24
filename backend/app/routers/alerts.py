@@ -34,4 +34,3 @@ def read_alert(alert_id: int, conn=Depends(db.get_conn)):
 def read_all(conn=Depends(db.get_conn)):
     conn.execute("UPDATE alerts SET is_read=1")
     return {"ok": True}
-
