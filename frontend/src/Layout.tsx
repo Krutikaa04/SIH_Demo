@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Bell, BarChart3, FilePlus2, Building2, FolderOpen, GitMerge, LayoutDashboard, FlaskConical, Search, Zap, RotateCcw, FastForward, ChevronDown, ShieldCheck, ShieldAlert, UserCog, Clock3, Share2, FileText } from 'lucide-react'
+import { Bell, BarChart3, FilePlus2, Building2, FolderOpen, GitMerge, LayoutDashboard, FlaskConical, Search, Zap, RotateCcw, FastForward, ChevronDown, ShieldCheck, ShieldAlert, UserCog, Clock3, Share2, FileText, Menu, X } from 'lucide-react'
 import { post, api, setRole, useApi, useRole } from './api'
 import { useToast } from './toast'
 import { ago, cx } from './ui'
@@ -31,6 +31,10 @@ export default function Layout() {
   const [busy, setBusy] = useState(false)
   const [bell, setBell] = useState(false)
   const [demo, setDemo] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const mobileCloseRef = useRef<HTMLButtonElement>(null)
+  const mobileMenuRef = useRef<HTMLElement>(null)
+  const mobileTriggerRef = useRef<HTMLButtonElement>(null)
   const bellRef = useRef<HTMLDivElement>(null)
   const demoRef = useRef<HTMLDivElement>(null)
 
@@ -47,6 +51,43 @@ export default function Layout() {
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
   }, [])
+
+  // Close mobile navigation after a route change.
+  useEffect(() => { setMobileOpen(false) }, [loc.pathname, loc.search])
+
+  useEffect(() => {
+    if (!mobileOpen) return
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    mobileCloseRef.current?.focus()
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setMobileOpen(false)
+      } else if (event.key === 'Tab') {
+        const elements = Array.from(mobileMenuRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), a[href]') || [])
+        if (!elements.length) return
+        const first = elements[0]
+        const last = elements[elements.length - 1]
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault()
+          last.focus()
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault()
+          first.focus()
+        }
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      document.body.style.overflow = previousOverflow
+      if (previouslyFocused?.isConnected) previouslyFocused.focus()
+      else mobileTriggerRef.current?.focus()
+    }
+  }, [mobileOpen])
 
   const counts: Record<string, number> = {
     overlaps: (overlaps.data?.items || []).filter((c: any) => c.status === 'OPEN').length,
@@ -108,6 +149,40 @@ export default function Layout() {
 
   return (
     <div className="flex h-screen overflow-hidden">
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <button type="button" aria-label="Close navigation" tabIndex={-1}
+            className="absolute inset-0 h-full w-full bg-slate-900/50" onClick={() => setMobileOpen(false)} />
+          <aside ref={mobileMenuRef} id="mobile-navigation" aria-label="Mobile navigation"
+            className="relative flex h-full w-60 max-w-[85vw] flex-col bg-navy text-slate-200 shadow-xl">
+            <div className="flex items-center justify-between gap-2 px-5 py-5">
+              <span className="font-bold text-white">AICTE ICMD</span>
+              <button ref={mobileCloseRef} type="button" aria-label="Close navigation"
+                onClick={() => setMobileOpen(false)}
+                className="rounded-md p-2 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
+                <X size={20} aria-hidden="true" />
+              </button>
+            </div>
+            <nav aria-label="Primary" className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3">
+              {NAV.map((n) => (
+                <NavLink key={n.to} to={n.to} end={n.end} onClick={() => setMobileOpen(false)}
+                  className={({ isActive }) => cx('flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-white',
+                    isActive ? 'bg-white/12 text-white shadow-inner' : 'text-slate-300 hover:bg-white/6 hover:text-white')}>
+                  <n.icon size={18} aria-hidden="true" />
+                  <span className="flex-1">{n.label}</span>
+                  {n.badge && counts[n.badge] > 0 && (
+                    <span className={cx('rounded-full px-1.5 py-0.5 text-[10.5px] font-bold num',
+                      n.badge === 'overlaps' ? 'bg-red-700 text-white' : 'bg-amber-400 text-navy')}>{counts[n.badge]}</span>)}
+                </NavLink>
+              ))}
+            </nav>
+            <div className="m-3 rounded-lg bg-white/6 p-3 text-[11px] leading-relaxed text-slate-300 ring-1 ring-white/10">
+              <div className="mb-1 flex items-center gap-1.5 font-semibold text-amber-300"><FlaskConical size={13} /> Prototype</div>
+              Synthetic data. All institutions are fictional. Runs fully offline.
+            </div>
+          </aside>
+        </div>
+      )}
       <aside className="hidden w-60 shrink-0 flex-col bg-navy text-slate-200 md:flex">
         <div className="flex items-center gap-3 px-5 py-5">
           <div className="grid h-9 w-9 place-items-center rounded-lg bg-white/10 ring-1 ring-white/15">
@@ -127,7 +202,7 @@ export default function Layout() {
               <span className="flex-1">{n.label}</span>
               {n.badge && counts[n.badge] > 0 && (
                 <span className={cx('rounded-full px-1.5 py-0.5 text-[10.5px] font-bold num',
-                  n.badge === 'overlaps' ? 'bg-red-500 text-white' : 'bg-amber-400 text-navy')}>{counts[n.badge]}</span>)}
+                  n.badge === 'overlaps' ? 'bg-red-700 text-white' : 'bg-amber-400 text-navy')}>{counts[n.badge]}</span>)}
             </NavLink>
           ))}
         </nav>
@@ -138,45 +213,53 @@ export default function Layout() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-5 py-3">
-          <form className="relative max-w-md flex-1" onSubmit={(e) => { e.preventDefault(); const t = q.trim(); nav(t.split(/\s+/).length >= 3 && !/^[\w/-]+$/.test(t) ? `/cases?nl=${encodeURIComponent(t)}` : `/cases?q=${encodeURIComponent(t)}`) }}>
+        <header className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-3 sm:px-5 md:flex-nowrap md:gap-3">
+          <button ref={mobileTriggerRef} type="button" aria-label="Open navigation"
+            aria-expanded={mobileOpen} aria-controls="mobile-navigation"
+            onClick={() => setMobileOpen(true)}
+            className="order-1 shrink-0 rounded-lg p-2 text-slate-700 hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 md:hidden">
+            <Menu size={20} aria-hidden="true" />
+          </button>
+          <form className="order-3 relative w-full min-w-0 md:order-none md:max-w-md md:flex-1" onSubmit={(e) => { e.preventDefault(); const t = q.trim(); nav(t.split(/\s+/).length >= 3 && !/^[\w/-]+$/.test(t) ? `/cases?nl=${encodeURIComponent(t)}` : `/cases?q=${encodeURIComponent(t)}`) }}>
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input value={q} onChange={(e) => setQ(e.target.value)}
+              aria-label="Search complaints"
               placeholder="Search, or ask: pending RB cases in Western region older than 30 days"
               className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none focus:border-navy-2 focus:bg-white focus:ring-2 focus:ring-navy-2/15" />
           </form>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="order-2 ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 md:order-none md:flex-nowrap">
             {offset > 0 && (
               <span title="Demo clock is advanced. Use Demo > Reset to return." className="flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-200">
                 <Clock3 size={13} /> Demo date +{offset}d
               </span>)}
 
-            <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 pl-2.5">
+            <div className="flex min-w-0 max-w-full items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 pl-2 md:max-w-none md:pl-2.5">
               <UserCog size={15} className="text-slate-400" />
               <select value={me.role} onChange={(e) => setRole({ role: e.target.value, region: e.target.value === 'REGIONAL' ? (me.region || 'Western') : '' })}
+                aria-label="Viewing as role"
                 title="Viewing as (prototype role switcher)"
-                className="max-w-[150px] cursor-pointer bg-transparent py-2 pr-1.5 text-sm font-medium text-slate-700 outline-none">
+                className="max-w-[105px] sm:max-w-[150px] cursor-pointer bg-transparent py-2 pr-1.5 text-sm font-medium text-slate-700 outline-none">
                 {(meta.data?.roles || [{ code: 'SENIOR', label: 'Senior Management' }]).map((r: any) => <option key={r.code} value={r.code}>{r.label}</option>)}
               </select>
               {me.role === 'REGIONAL' && (
-                <select value={me.region} onChange={(e) => setRole({ role: 'REGIONAL', region: e.target.value })}
-                  className="cursor-pointer border-l border-slate-200 bg-transparent py-2 pl-2 pr-1.5 text-sm font-medium text-slate-700 outline-none">
+                <select aria-label="Select region" value={me.region} onChange={(e) => setRole({ role: 'REGIONAL', region: e.target.value })}
+                  className="max-w-[100px] cursor-pointer border-l border-slate-200 bg-transparent py-2 pl-2 pr-1.5 sm:max-w-[150px] text-sm font-medium text-slate-700 outline-none">
                   {(meta.data?.regions || []).map((r: any) => <option key={r.name} value={r.name}>{r.name}</option>)}
                 </select>)}
             </div>
 
             <button onClick={simulate} disabled={busy}
-              className="flex items-center gap-2 rounded-lg bg-saffron px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:brightness-95 disabled:opacity-60">
+           className="flex items-center gap-2 rounded-lg bg-saffron px-3.5 py-2 text-sm font-semibold text-slate-950 shadow-sm transition hover:brightness-95 disabled:opacity-60">
               <Zap size={16} className={busy ? 'animate-pulse' : ''} /> <span className="hidden lg:inline">Simulate New Complaint</span><span className="lg:hidden">Simulate</span>
             </button>
 
             <div className="relative" ref={bellRef}>
-              <button onClick={() => setBell((v) => !v)} className="relative rounded-lg p-2 text-slate-600 hover:bg-slate-100">
+              <button type="button" aria-label={`Notifications${counts.alerts ? `, ${counts.alerts} unread` : ''}`} aria-expanded={bell} aria-controls="header-alerts-menu" onClick={() => setBell((v) => !v)} className="relative rounded-lg p-2 text-slate-600 hover:bg-slate-100">
                 <Bell size={20} />
                 {counts.alerts > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-4.5 min-w-4.5 place-items-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white num">{counts.alerts}</span>}
               </button>
               {bell && (
-                <div className="toast-in absolute right-0 top-11 z-30 w-[380px] overflow-hidden rounded-xl bg-white shadow-xl ring-1 ring-slate-200">
+                <div id="header-alerts-menu" role="region" aria-label="Recent alerts" className="toast-in fixed left-3 right-3 top-28 z-30 max-h-[65vh] overflow-y-auto rounded-xl bg-white shadow-xl ring-1 ring-slate-200 sm:absolute sm:left-auto sm:right-0 sm:top-11 sm:w-[380px]">
                   <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5">
                     <span className="text-sm font-semibold">Alerts</span>
                     <button className="text-xs font-medium text-navy-2 hover:underline" onClick={() => { setBell(false); nav('/alerts') }}>View all</button>
@@ -200,12 +283,12 @@ export default function Layout() {
             </div>
 
             <div className="relative" ref={demoRef}>
-              <button onClick={() => setDemo((v) => !v)}
+              <button type="button" aria-expanded={demo} aria-controls="header-demo-menu" onClick={() => setDemo((v) => !v)}
                 className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
                 Demo <ChevronDown size={14} />
               </button>
               {demo && (
-                <div className="toast-in absolute right-0 top-11 z-30 w-64 rounded-xl bg-white p-1.5 shadow-xl ring-1 ring-slate-200">
+                <div id="header-demo-menu" role="region" aria-label="Demo actions" className="toast-in fixed left-3 right-3 top-28 z-30 max-h-[65vh] overflow-y-auto rounded-xl bg-white p-1.5 shadow-xl ring-1 ring-slate-200 sm:absolute sm:left-auto sm:right-0 sm:top-11 sm:w-64">
                   <button onClick={simulate} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-slate-50"><Zap size={15} className="text-saffron" /> Simulate new complaint</button>
                   <button onClick={timeMachine} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-slate-50"><FastForward size={15} className="text-blue-600" /> Time machine: +7 days</button>
                   <div className="my-1 border-t border-slate-100" />
@@ -220,7 +303,7 @@ export default function Layout() {
             </div>
           </div>
         </header>
-        <main className="flex-1 overflow-auto p-6"><Outlet /></main>
+        <main className="min-h-0 flex-1 overflow-auto p-3 sm:p-6"><Outlet /></main>
       </div>
     </div>
   )

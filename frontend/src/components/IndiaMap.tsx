@@ -37,14 +37,14 @@ export default function IndiaMap({ regions, onSelect }: { regions: Region[]; onS
   const h = hover ? byRegion[hover] : null
 
   return (
-    <div>
-      <div className="mb-2 flex rounded-lg bg-slate-100 p-1 text-xs">
+    <div className="min-w-0 max-w-full">
+      <div className="mb-2 grid min-w-0 grid-cols-3 rounded-lg bg-slate-100 p-1 text-xs">
         {Object.entries(METRICS).map(([k, v]) => (
-          <button key={k} onClick={() => setMetric(k as any)}
-            className={cx('flex-1 rounded-md px-2 py-1 font-medium transition', metric === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700')}>{v.label}</button>))}
+          <button key={k} type="button" onClick={() => setMetric(k as any)}
+            className={cx('min-w-0 rounded-md px-1 py-1 text-[10px] font-medium leading-tight transition sm:px-2 sm:text-xs', metric === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700')}>{v.label}</button>))}
       </div>
-      <div className="relative">
-        <svg viewBox={`0 0 ${W} ${H}`} className="mx-auto w-full max-w-[420px]" onMouseLeave={() => setHover(null)}>
+      <div className="relative min-w-0 max-w-full">
+        <svg viewBox={`0 0 ${W} ${H}`} className="mx-auto block h-auto w-full max-w-[420px]" onMouseLeave={() => setHover(null)}>
           {paths.map((p: any, i: number) => (
             <path key={i} d={p.d} fill={color(p.region)} stroke="#fff" strokeWidth={hover === p.region ? 1.6 : 0.7}
               opacity={hover && hover !== p.region ? 0.55 : 1} className="cursor-pointer transition-opacity"
@@ -63,9 +63,9 @@ export default function IndiaMap({ regions, onSelect }: { regions: Region[]; onS
             <div className="mt-1 text-[10px] text-slate-400">Click to open cases</div>
           </div>)}
       </div>
-      <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500">
+      <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] text-slate-500">
         <span className="num">{Math.round(min)}</span>
-        <span className="h-2 flex-1 rounded-full" style={{ background: `linear-gradient(90deg, ${m.from}, ${m.to})` }} />
+        <span className="h-2 min-w-0 flex-1 rounded-full" style={{ background: `linear-gradient(90deg, ${m.from}, ${m.to})` }} />
         <span className="num">{Math.round(max)}</span>
         <span className="ml-1">{m.label}</span>
       </div>

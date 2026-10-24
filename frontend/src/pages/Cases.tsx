@@ -121,9 +121,9 @@ export default function Cases() {
                 <button onClick={() => { const e = new URLSearchParams(sp); e.delete('nl'); download('/export/cases?' + e.toString(), 'aicte_cases.csv') }}
                   className="flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"><FileSpreadsheet size={13} className="text-emerald-600" /> Export CSV</button></span>
               <div className="flex items-center gap-2">
-                <button disabled={page <= 1} onClick={() => setPage(page - 1)} className="rounded-md border border-slate-200 p-1 disabled:opacity-30"><ChevronLeft size={16} /></button>
+                <button aria-label="Previous page" disabled={page <= 1} onClick={() => setPage(page - 1)} className="rounded-md border border-slate-200 p-1 disabled:opacity-30"><ChevronLeft size={16} /></button>
                 <span className="num text-xs">Page {data.page} / {Math.max(1, Math.ceil(data.total / data.page_size))}</span>
-                <button disabled={page * data.page_size >= data.total} onClick={() => setPage(page + 1)} className="rounded-md border border-slate-200 p-1 disabled:opacity-30"><ChevronRight size={16} /></button>
+                <button aria-label="Next page" disabled={page * data.page_size >= data.total} onClick={() => setPage(page + 1)} className="rounded-md border border-slate-200 p-1 disabled:opacity-30"><ChevronRight size={16} /></button>
               </div>
             </div>
             <div className="overflow-x-auto">
