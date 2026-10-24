@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import db, events, extras, intel, reports, risk, roles, seed, services, sla, galaxy, briefings
+from . import db, events, extras, intel, reports, risk, roles, seed, services, sla, galaxy, briefings, notify
 from .constants import (BUREAUS, BUREAU_ORDER, CATEGORIES, OPEN_STATUSES, REGION_STATES, SLA_DAYS, STATUSES)
 from .roles import get_ctx
 
@@ -590,6 +590,57 @@ def read_alert(alert_id: int, conn=Depends(db.get_conn)):
 def read_all(conn=Depends(db.get_conn)):
     conn.execute("UPDATE alerts SET is_read=1")
     return {"ok": True}
+
+
+@app.post("/api/alerts/{alert_id}/notify")
+def dispatch_alert_reminder(alert_id: int, body: dict = Body(default={}),
+                            conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    if ctx.role == "REGIONAL":
+        raise HTTPException(403, "Regional role cannot dispatch reminder notifications")
+    alert = db.one(conn, "SELECT * FROM alerts WHERE id=?", (alert_id,))
+    if not alert:
+        raise HTTPException(404, "Alert not found")
+    if ctx.role in BUREAUS:
+        if alert["case_id"]:
+            c = db.one(conn, "SELECT bureau_code FROM cases WHERE case_id=?", (alert["case_id"],))
+            if c and c["bureau_code"] != ctx.role:
+                raise HTTPException(403, f"Bureau {ctx.role} cannot dispatch reminders for {c['bureau_code']} cases")
+    channel = body.get("channel", "email")
+    actor = f"{ctx.role} Officer" if ctx.role in BUREAUS else ("Senior Management" if ctx.role == "SENIOR" else ctx.role)
+    try:
+        res = notify.dispatch_notification(conn, alert_id, channel=channel, created_by=actor)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except KeyError:
+        raise HTTPException(404, "Alert not found")
+    return res
+
+
+@app.get("/api/alerts/{alert_id}/notify/preview")
+def preview_alert_reminder(alert_id: int, channel: str = "email",
+                           conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    if ctx.role == "REGIONAL":
+        raise HTTPException(403, "Regional role cannot preview reminder notifications")
+    alert = db.one(conn, "SELECT * FROM alerts WHERE id=?", (alert_id,))
+    if not alert:
+        raise HTTPException(404, "Alert not found")
+    if channel.lower() not in ("email", "sms"):
+        raise HTTPException(400, "Invalid channel: must be 'email' or 'sms'")
+    preview = notify.render_notification(conn, alert, channel=channel)
+    preview["is_simulated"] = True
+    return preview
+
+
+@app.get("/api/outbox")
+def list_outbox(limit: int = 50, channel: str = "", conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    where, params = [], []
+    if channel:
+        where.append("channel=?")
+        params.append(channel.lower())
+    w = ("WHERE " + " AND ".join(where)) if where else ""
+    sql = f"SELECT * FROM outbox {w} ORDER BY id DESC LIMIT ?"
+    items = db.rows(conn, sql, (*params, min(limit, 200)))
+    return {"items": items, "total": len(items)}
 
 
 # ------------------------------------------------------------------ demo / admin ---
