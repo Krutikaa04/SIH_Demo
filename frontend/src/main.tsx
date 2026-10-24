@@ -17,6 +17,7 @@ import Reports from './pages/Reports'
 import Register from './pages/Register'
 import Galaxy from './pages/Galaxy'
 import Briefings from './pages/Briefings'
+import AuditVault from './pages/AuditVault'
 
 startEvents()
 
@@ -38,6 +39,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="alerts" element={<Alerts />} />
             <Route path="reports" element={<Reports />} />
             <Route path="register" element={<Register />} />
+            <Route path="audit" element={<AuditVault />} />
           </Route>
         </Routes>
       </ToastProvider>

@@ -15,6 +15,7 @@ const NAV = [
   { to: '/briefings', label: 'Executive Briefing', icon: FileText },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
   { to: '/alerts', label: 'Alerts', icon: Bell, badge: 'alerts' },
+  { to: '/audit', label: 'Audit Vault', icon: ShieldCheck },
 ]
 
 
