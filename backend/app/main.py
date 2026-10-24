@@ -2,6 +2,7 @@
 import asyncio
 import json
 import sqlite3
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -11,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import db, events, extras, intel, reports, risk, roles, seed, services, sla, galaxy, briefings
+from . import db, events, extras, intel, reports, risk, roles, seed, services, sla, galaxy, briefings, sla_rules
 from .constants import (BUREAUS, BUREAU_ORDER, CATEGORIES, OPEN_STATUSES, REGION_STATES, SLA_DAYS, STATUSES)
 from .roles import get_ctx
 
@@ -69,12 +70,133 @@ def meta_officers(conn=Depends(db.get_conn)):
     return {"items": db.rows(conn, "SELECT id,name,bureau_code,designation,level FROM officers ORDER BY bureau_code, level")}
 
 
+# ------------------------------------------------------------------ SLA rules ------
+
+@app.get("/api/sla-rules")
+def list_sla_rules(conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    """List configured Bureau-wide and category-specific SLA rules."""
+
+    rules = db.rows(
+        conn,
+        """
+        SELECT id, bureau, category, days, warn_pct, use_working_days
+        FROM sla_rules
+        ORDER BY bureau,
+                 CASE WHEN category='*' THEN 0 ELSE 1 END,
+                 category
+        """
+    )
+
+    return {
+        "items": [
+            {
+                **rule,
+                "use_working_days": bool(rule["use_working_days"])
+            }
+            for rule in rules
+        ],
+        "total": len(rules)
+    }
+
+
+@app.put("/api/sla-rules/{rule_id}")
+def update_sla_rule(
+    rule_id: int,
+    body: dict = Body(...),
+    conn=Depends(db.get_conn),
+    ctx=Depends(get_ctx)
+):
+    """Update an SLA rule. Senior Management only."""
+
+    if ctx.role != "SENIOR":
+        roles.forbid("Only Senior Management can update SLA rules")
+
+    old = db.one(
+        conn,
+        "SELECT * FROM sla_rules WHERE id=?",
+        (rule_id,)
+    )
+
+    if not old:
+        raise HTTPException(404, "SLA rule not found")
+
+    allowed = {"days", "warn_pct", "use_working_days"}
+
+    if not body or set(body) - allowed:
+        raise HTTPException(
+            422,
+            "Only days, warn_pct and use_working_days may be updated"
+        )
+
+    days = body.get("days", old["days"])
+    warn_pct = body.get("warn_pct", old["warn_pct"])
+    use_working_days = body.get(
+        "use_working_days",
+        bool(old["use_working_days"])
+    )
+
+    if type(days) is not int or not 1 <= days <= 365:
+        raise HTTPException(422, "days must be an integer from 1 to 365")
+
+    if type(warn_pct) is not int or not 1 <= warn_pct <= 99:
+        raise HTTPException(422, "warn_pct must be an integer from 1 to 99")
+
+    if type(use_working_days) is not bool:
+        raise HTTPException(422, "use_working_days must be a boolean")
+
+    conn.execute(
+        """
+        UPDATE sla_rules
+        SET days=?, warn_pct=?, use_working_days=?
+        WHERE id=?
+        """,
+        (days, warn_pct, int(use_working_days), rule_id)
+    )
+
+    updated = db.one(
+        conn,
+        "SELECT * FROM sla_rules WHERE id=?",
+        (rule_id,)
+    )
+
+    audit = {
+        "action": "SLA_RULE_UPDATED",
+        "rule_id": rule_id,
+        "timestamp": db.iso(db.now(conn)),
+        "actor": {
+            "id": ctx.persona[0],
+            "name": ctx.persona[1],
+            "role": ctx.role
+        },
+        "before": old,
+        "after": updated
+    }
+
+    db.set_setting(
+        conn,
+        "sla_rule_audit_" + uuid.uuid4().hex,
+        json.dumps(audit, ensure_ascii=False)
+    )
+
+    conn.commit()
+    events.publish("dashboard.invalidate", {})
+
+    return {
+        "ok": True,
+        "rule": {
+            **updated,
+            "use_working_days": bool(updated["use_working_days"])
+        }
+    }
+
+
 @app.get("/api/clock")
 def get_clock(conn=Depends(db.get_conn)):
     return {"offset_days": int(db.get_setting(conn, "clock_offset_days", "0")), "now": db.iso(db.now(conn))}
 
 
 # ------------------------------------------------------------------ cases ---------
+
 
 @app.get("/api/cases")
 def list_cases(q: str = "", bureau: str = "", region: str = "", category: str = "", status: str = "",
@@ -83,21 +205,52 @@ def list_cases(q: str = "", bureau: str = "", region: str = "", category: str = 
                sort: str = "received_desc", page: int = 1, page_size: int = 25,
                conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
     today = db.now(conn).date()
+
     if ctx.role == "REGIONAL":
         region = ctx.region
-    where, params = services.case_where(today, q, bureau, region, category, status, institution_id, date_from,
-                                        date_to, overdue, overlap, nearing, age_gt, age_lt)
+
+    where, params = services.case_where(
+        today, q, bureau, region, category, status,
+        institution_id, date_from, date_to, overdue,
+        overlap, nearing, age_gt, age_lt, conn=conn
+    )
+
     w = ("WHERE " + " AND ".join(where)) if where else ""
-    order = {"received_desc": "c.received_on DESC, c.case_id", "received_asc": "c.received_on ASC, c.case_id",
-             "due_asc": "c.due_date ASC", "severity_desc": "c.severity DESC, c.received_on"}.get(sort, "c.received_on DESC")
-    total = conn.execute(f"SELECT COUNT(*) FROM cases c LEFT JOIN institutions i ON i.aicte_id=c.institution_id {w}",
-                         params).fetchone()[0]
+
+    order = {
+        "received_desc": "c.received_on DESC, c.case_id",
+        "received_asc": "c.received_on ASC, c.case_id",
+        "due_asc": "c.due_date ASC",
+        "severity_desc": "c.severity DESC, c.received_on"
+    }.get(sort, "c.received_on DESC")
+
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM cases c "
+        f"LEFT JOIN institutions i ON i.aicte_id=c.institution_id {w}",
+        params
+    ).fetchone()[0]
+
     page_size = max(1, min(page_size, 200))
-    rows = db.rows(conn, services.CASE_SELECT + f" {w} ORDER BY {order} LIMIT ? OFFSET ?",
-                   (*params, page_size, (max(page, 1) - 1) * page_size))
-    cl, bl = services.cluster_map(conn), services.bureau_lookup(conn)
-    return {"items": [services.serialize_case(r, today, cl, bl) for r in rows], "total": total,
-            "page": page, "page_size": page_size}
+
+    rows = db.rows(
+        conn,
+        services.CASE_SELECT + f" {w} ORDER BY {order} LIMIT ? OFFSET ?",
+        (*params, page_size, (max(page, 1) - 1) * page_size)
+    )
+
+    cl = services.cluster_map(conn)
+    bl = services.bureau_lookup(conn)
+    holidays = sla_rules.holiday_dates(conn)
+
+    return {
+        "items": [
+            services.serialize_case(r, today, cl, bl, holidays=holidays)
+            for r in rows
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size
+    }
 
 
 @app.get("/api/cases/{case_id:path}/history")
@@ -262,20 +415,29 @@ def get_institution(aicte_id: str, conn=Depends(db.get_conn), ctx=Depends(get_ct
 
 # ------------------------------------------------------------------ dashboard ------
 
+
 @app.get("/api/dashboard/summary")
 def dashboard(conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
     now_dt = db.now(conn)
     today = now_dt.date()
+    holidays = sla_rules.holiday_dates(conn)
+
     rows = db.rows(conn, services.CASE_SELECT)
+
     if ctx.role == "REGIONAL":
         rows = [r for r in rows if r["inst_region"] == ctx.region]
+
     region_ids = {r["case_id"] for r in rows}
     insts = {r["aicte_id"]: r for r in db.rows(conn, "SELECT * FROM institutions")}
+
     for r in rows:
-        r["_sla"] = services.sla_info(r, today)
+        r["_sla"] = services.sla_info(r, today, holidays)
+
     open_ = [r for r in rows if _is_open(r)]
+
     totals = {
-        "received": len(rows), "pending": len(open_),
+        "received": len(rows),
+        "pending": len(open_),
         "under_process": sum(1 for r in rows if r["status"] == "Under Process"),
         "disposed": sum(1 for r in rows if r["status"] == "Disposed"),
         "transferred": sum(1 for r in rows if r["status"] == "Transferred"),
@@ -283,16 +445,25 @@ def dashboard(conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
         "beyond_sla": sum(1 for r in open_ if r["_sla"]["state"] == "BREACHED"),
         "nearing_sla": sum(1 for r in open_ if r["_sla"]["state"] == "NEARING"),
     }
+
     workload = []
     for b in BUREAUS:
         mine = [r for r in open_ if r["bureau_code"] == b]
-        workload.append({"bureau": b, "name": BUREAUS[b], "pending": len(mine),
-                         "under_process": sum(1 for r in mine if r["status"] == "Under Process"),
-                         "overdue": sum(1 for r in mine if r["_sla"]["state"] == "BREACHED"),
-                         "disposed": sum(1 for r in rows if r["bureau_code"] == b and r["status"] == "Disposed")})
+        workload.append({
+            "bureau": b,
+            "name": BUREAUS[b],
+            "pending": len(mine),
+            "under_process": sum(1 for r in mine if r["status"] == "Under Process"),
+            "overdue": sum(1 for r in mine if r["_sla"]["state"] == "BREACHED"),
+            "disposed": sum(1 for r in rows if r["bureau_code"] == b and r["status"] == "Disposed")
+        })
+
     per_inst = {}
     for r in rows:
-        d = per_inst.setdefault(r["institution_id"], {"total": 0, "open": 0, "overdue": 0, "overlap": False})
+        d = per_inst.setdefault(
+            r["institution_id"],
+            {"total": 0, "open": 0, "overdue": 0, "overlap": False}
+        )
         d["total"] += 1
         if _is_open(r):
             d["open"] += 1
@@ -300,10 +471,25 @@ def dashboard(conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
                 d["overdue"] += 1
             if r["cluster_id"]:
                 d["overlap"] = True
+
     rk = risk.compute_all(conn)
-    top = sorted(per_inst.items(), key=lambda kv: (-rk[kv[0]]["score"], -kv[1]["overdue"]))[:8]
-    top_institutions = [{"aicte_id": k, "name": insts[k]["name"], "region": insts[k]["region"],
-                         "risk": rk[k]["score"], "risk_band": rk[k]["band"], **v} for k, v in top]
+    top = sorted(
+        per_inst.items(),
+        key=lambda kv: (-rk[kv[0]]["score"], -kv[1]["overdue"])
+    )[:8]
+
+    top_institutions = [
+        {
+            "aicte_id": k,
+            "name": insts[k]["name"],
+            "region": insts[k]["region"],
+            "risk": rk[k]["score"],
+            "risk_band": rk[k]["band"],
+            **v
+        }
+        for k, v in top
+    ]
+
     months = []
     y, m = today.year, today.month
     for _ in range(6):
@@ -312,57 +498,138 @@ def dashboard(conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
         if m == 0:
             y, m = y - 1, 12
     months.reverse()
-    trend = [{"month": mo, "received": sum(1 for r in rows if r["received_on"].startswith(mo)),
-              "disposed": sum(1 for r in rows if (r["disposed_on"] or "").startswith(mo))} for mo in months]
+
+    trend = [
+        {
+            "month": mo,
+            "received": sum(1 for r in rows if r["received_on"].startswith(mo)),
+            "disposed": sum(1 for r in rows if (r["disposed_on"] or "").startswith(mo))
+        }
+        for mo in months
+    ]
+
     ageing = {"0-15": 0, "16-30": 0, "31-60": 0, "60+": 0}
     for r in open_:
         a = r["_sla"]["age_days"]
-        ageing["0-15" if a <= 15 else "16-30" if a <= 30 else "31-60" if a <= 60 else "60+"] += 1
+        ageing[
+            "0-15" if a <= 15 else
+            "16-30" if a <= 30 else
+            "31-60" if a <= 60 else "60+"
+        ] += 1
+
     cmap = services.cluster_map(conn)
     cmap = {k: v for k, v in cmap.items() if v["cases"] & region_ids}
     active = {k: v for k, v in cmap.items() if v["status"] in ("OPEN", "LINKED")}
     resolved = {k: v for k, v in cmap.items() if v["status"] == "RESOLVED"}
+
     bl = services.bureau_lookup(conn)
-    saved_units = sum(max(1, len({bl[c] for c in v["cases"]}) - 1) for v in resolved.values())
+    saved_units = sum(
+        max(1, len({bl[c] for c in v["cases"]}) - 1)
+        for v in resolved.values()
+    )
+
     regions = []
     for reg, states in REGION_STATES.items():
         if ctx.role == "REGIONAL" and reg != ctx.region:
             continue
+
         rr = [r for r in rows if r["inst_region"] == reg]
         ro = [r for r in rr if _is_open(r)]
-        reg_risk = [rk[i]["score"] for i, x in insts.items() if x["region"] == reg and i in rk]
-        regions.append({"region": reg, "states": states, "total": len(rr), "pending": len(ro),
-                        "overdue": sum(1 for r in ro if r["_sla"]["state"] == "BREACHED"),
-                        "avg_risk": round(sum(reg_risk) / len(reg_risk), 1) if reg_risk else 0})
-    act = [a for a in db.rows(conn, "SELECT h.*, c.institution_id FROM action_history h JOIN cases c "
-                                    "ON c.case_id=h.case_id ORDER BY h.ts DESC LIMIT 60") if a["case_id"] in region_ids][:8]
-    activity = [{"ts": a["ts"], "case_id": a["case_id"], "action_type": a["action_type"], "actor": a["actor_name"],
-                 "bureau": a["actor_bureau"], "remarks": a["remarks"],
-                 "institution": insts[a["institution_id"]]["name"]} for a in act]
+        reg_risk = [
+            rk[i]["score"]
+            for i, x in insts.items()
+            if x["region"] == reg and i in rk
+        ]
+
+        regions.append({
+            "region": reg,
+            "states": states,
+            "total": len(rr),
+            "pending": len(ro),
+            "overdue": sum(1 for r in ro if r["_sla"]["state"] == "BREACHED"),
+            "avg_risk": round(sum(reg_risk) / len(reg_risk), 1) if reg_risk else 0
+        })
+
+    act = [
+        a for a in db.rows(
+            conn,
+            "SELECT h.*, c.institution_id FROM action_history h "
+            "JOIN cases c ON c.case_id=h.case_id "
+            "ORDER BY h.ts DESC LIMIT 60"
+        )
+        if a["case_id"] in region_ids
+    ][:8]
+
+    activity = [
+        {
+            "ts": a["ts"],
+            "case_id": a["case_id"],
+            "action_type": a["action_type"],
+            "actor": a["actor_name"],
+            "bureau": a["actor_bureau"],
+            "remarks": a["remarks"],
+            "institution": insts[a["institution_id"]]["name"]
+        }
+        for a in act
+    ]
+
     desk = None
     if ctx.is_bureau:
         mine = [r for r in open_ if r["bureau_code"] == ctx.role]
         mine.sort(key=lambda r: (r["due_date"], -r["severity"]))
-        desk = {"bureau": ctx.role, "name": BUREAUS[ctx.role], "open": len(mine),
-                "overdue": sum(1 for r in mine if r["_sla"]["state"] == "BREACHED"),
-                "nearing": sum(1 for r in mine if r["_sla"]["state"] == "NEARING"),
-                "escalated": sum(1 for r in mine if r["status"] == "Escalated"),
-                "in_overlap": sum(1 for r in mine if r["cluster_id"]),
-                "urgent": [{"case_id": r["case_id"], "institution": r["inst_name"], "category": r["category"],
-                            "status": r["status"], "sla": r["_sla"]} for r in mine[:6]]}
-    return {"as_of": db.iso(now_dt), "role": ctx.role, "region": ctx.region, "desk": desk,
-            "briefing": reports.briefing(conn, ctx),
-            "clock_offset_days": int(db.get_setting(conn, "clock_offset_days", "0")), "totals": totals,
-            "overlap": {"open_clusters": len(active),
-                        "cases_involved": len({c for v in active.values() for c in v["cases"]}),
-                        "rooms_active": conn.execute("SELECT COUNT(*) FROM coordination_rooms WHERE status='OPEN'").fetchone()[0],
-                        "resolved_clusters": len(resolved)},
-            "effort_saved": {"clusters_resolved": len(resolved), "officer_hours": saved_units * 6,
-                             "days": round(saved_units * 4.5, 1),
-                             "assumptions": "Estimate: 6 officer-hours and 4.5 days saved per duplicate Bureau "
-                                            "track avoided by a coordinated decision."},
-            "workload": workload, "top_institutions": top_institutions, "trend": trend, "ageing": ageing,
-            "regions": regions, "activity": activity}
+
+        desk = {
+            "bureau": ctx.role,
+            "name": BUREAUS[ctx.role],
+            "open": len(mine),
+            "overdue": sum(1 for r in mine if r["_sla"]["state"] == "BREACHED"),
+            "nearing": sum(1 for r in mine if r["_sla"]["state"] == "NEARING"),
+            "escalated": sum(1 for r in mine if r["status"] == "Escalated"),
+            "in_overlap": sum(1 for r in mine if r["cluster_id"]),
+            "urgent": [
+                {
+                    "case_id": r["case_id"],
+                    "institution": r["inst_name"],
+                    "category": r["category"],
+                    "status": r["status"],
+                    "sla": r["_sla"]
+                }
+                for r in mine[:6]
+            ]
+        }
+
+    return {
+        "as_of": db.iso(now_dt),
+        "role": ctx.role,
+        "region": ctx.region,
+        "desk": desk,
+        "briefing": reports.briefing(conn, ctx),
+        "clock_offset_days": int(db.get_setting(conn, "clock_offset_days", "0")),
+        "totals": totals,
+        "overlap": {
+            "open_clusters": len(active),
+            "cases_involved": len({c for v in active.values() for c in v["cases"]}),
+            "rooms_active": conn.execute(
+                "SELECT COUNT(*) FROM coordination_rooms WHERE status='OPEN'"
+            ).fetchone()[0],
+            "resolved_clusters": len(resolved)
+        },
+        "effort_saved": {
+            "clusters_resolved": len(resolved),
+            "officer_hours": saved_units * 6,
+            "days": round(saved_units * 4.5, 1),
+            "assumptions": (
+                "Estimate: 6 officer-hours and 4.5 days saved per "
+                "duplicate Bureau track avoided by a coordinated decision."
+            )
+        },
+        "workload": workload,
+        "top_institutions": top_institutions,
+        "trend": trend,
+        "ageing": ageing,
+        "regions": regions,
+        "activity": activity
+    }
 
 
 # ------------------------------------------------------------------ overlaps -------

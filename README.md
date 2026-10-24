@@ -35,8 +35,7 @@ Run the backend in another terminal with `python run.py --no-browser`.
 - Coordination Room: link cases, pick lead Bureau, comment, record decision
 - Dashboard with KPIs, charts, ageing, trend, risk-ranked institutions and live activity
 - **Simulate New Complaint** button: files a scripted complaint through the real pipeline and fires a live alert
-- **SLA engine**: countdown timers, 75% warnings, auto-escalation at 100% (Deputy Director) and 150% (Director),
-  ping-pong transfer alerts and daily pending-reminder digests. Demo > "Time machine: +7 days" triggers it live
+- **SLA engine**: configurable Bureau-wide and category-specific timelines, calendar-day or working-day calculations (excluding weekends and configured holidays), configurable warning thresholds (default 75%), automatic escalation at 100% (Deputy Director) and 150% (Director), countdown timers, ping-pong transfer alerts and daily pending-reminder digests. SLA settings are snapshotted when each complaint is registered, so subsequent rule changes do not alter existing case timelines. Demo > "Time machine: +7 days" triggers the engine live.
 - **Case workflow**: remark, assign, transfer, escalate, dispose; every action is hash-chained, with
   "Verify integrity" and a demo "Tamper with a record" button
 - **Institution risk score** (volume + severity + repeat offences + overdue), colour-coded, with breakdown
@@ -52,6 +51,91 @@ Run the backend in another terminal with `python run.py --no-browser`.
 - **Register complaint** (new page): live institution match and overlap preview while typing, plus bulk CSV import (validate first)
 - **Coordination guard**: acting on an overlapping case needs a logged acknowledgement; after a MERGE the follower Bureau cannot transfer/escalate/dispose
 - **Daily briefing** for Senior Management / Regional Offices and a "duplicate effort saved" estimate on the dashboard
+
+## Configurable SLA Rules (Issue #19)
+
+The system supports different prescribed complaint timelines for each Bureau and complaint category.
+
+### Rule priority
+
+When a complaint is registered, its SLA rule is selected in this order:
+
+1. Exact match: Bureau + complaint category.
+2. Bureau default: category `*`.
+3. Legacy fallback from `SLA_DAYS` if no matching rule exists.
+
+The selected rule is stored on the complaint. Updating a rule affects newly registered complaints only.
+
+### Rule fields
+
+| Field              | Description                                                   |
+| ------------------ | ------------------------------------------------------------- |
+| `bureau`           | Bureau code, such as `RB` or `PGRC`                           |
+| `category`         | Complaint category, or `*` for the Bureau default             |
+| `days`             | Prescribed timeline (1–365 days)                              |
+| `warn_pct`         | Percentage at which a warning is raised (1–99), default 75    |
+| `use_working_days` | Whether to exclude Saturdays, Sundays and configured holidays |
+
+### Working-day calculations
+
+- Calendar-day rules count every calendar day.
+- Working-day rules exclude Saturdays, Sundays and dates in the `holidays` database table.
+- The receipt date counts as day zero.
+- The due date is calculated from the selected rule when the case is registered.
+- The SLA engine uses the demo clock when calculating progress and escalations.
+
+The holiday calendar is empty by default. Administrators can populate the `holidays` table with ISO-formatted dates (`YYYY-MM-DD`) and holiday names.
+
+### API endpoints
+
+**List rules**
+
+`GET /api/sla-rules`
+
+Returns all configured Bureau defaults and category-specific rules.
+
+**Update a rule**
+
+`PUT /api/sla-rules/{rule_id}`
+
+Only the `SENIOR` role can update SLA rules.
+
+Example request:
+
+```json
+{
+  "days": 14,
+  "warn_pct": 70,
+  "use_working_days": true
+}
+```
+
+Each field is validated before updating. Changes are recorded in the settings audit log and do not modify existing complaints.
+
+### Case-level SLA snapshot
+
+Every complaint stores:
+
+- `sla_days`
+- `sla_warn_pct`
+- `sla_use_working_days`
+- `due_date`
+
+These values remain unchanged if the corresponding Bureau or category rule is subsequently edited.
+
+### Tests
+
+Run:
+
+```bash
+python -m pytest backend/tests/test_sla_rules.py -q
+```
+
+Then run the full regression suite:
+
+```bash
+python -m pytest backend/tests -q
+```
 
 ## Rehearsal & safety net
 
