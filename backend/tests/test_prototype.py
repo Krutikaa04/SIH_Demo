@@ -1,35 +1,22 @@
 """Regression tests for the demo: overlap engine (positives AND decoys), hash chain, SLA engine, NL parser, roles.
 
-Run:  python -m pytest backend/tests -q      (or: python -m unittest discover backend/tests)
+Run:  python -m pytest backend/tests -q
 Uses a throw-away database, never data/demo.db.
 """
-import os
-import sys
-import tempfile
 import unittest
-from pathlib import Path
 
-_tmp = tempfile.mkdtemp()
-os.environ["AICTE_DB"] = str(Path(_tmp) / "test.db")
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import pytest
 
-from app import db, intel, nlsearch, risk, roles, seed, services, sla  # noqa: E402
+from app import db, intel, nlsearch, risk, roles, seed, services, sla
 
 HERO = "1-4520311"
 
 
-def setUpModule():
-    conn = db.connect()
-    seed.seed(conn)
-    conn.close()
-
-
 class Base(unittest.TestCase):
-    def setUp(self):
-        self.conn = db.connect()
+    @pytest.fixture(autouse=True)
+    def setup_database(self, conn):
+        self.conn = conn
 
-    def tearDown(self):
-        self.conn.close()
 
 
 class TestEntityResolution(Base):
@@ -155,7 +142,7 @@ class TestRiskAndRoles(Base):
 
 
 class TestZSimulation(Base):
-    """Runs last: it adds cases and overlap clusters to the shared test DB."""
+    """Exercises all simulation scenarios on an isolated database."""
 
     def test_all_simulation_scenarios_fire_a_high_alert(self):
         for n in range(1, 7):

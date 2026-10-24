@@ -3,19 +3,12 @@
 Covers the review-status bug (CONFIRMED / DEFERRED made a cluster look DISMISSED, which dropped it from the
 coordination list and switched the coordination guard off) and the double-tamper restore bug.
 """
-import os
-import sys
-import tempfile
 import unittest
-from pathlib import Path
 
-if "AICTE_DB" not in os.environ:
-    os.environ["AICTE_DB"] = str(Path(tempfile.mkdtemp()) / "review.db")
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import pytest
+from fastapi import HTTPException
 
-from fastapi import HTTPException  # noqa: E402
-
-from app import db, main, roles, seed, services  # noqa: E402
+from app import db, main, roles, seed, services
 
 HERO = "1-4520311"
 
@@ -26,16 +19,10 @@ def _ctx(role, region=""):
 
 
 class TestReviewAndRestore(unittest.TestCase):
-    def setUp(self):
-        # fresh, known state for every test (seeding takes ~2 s)
-        conn = db.connect()
-        seed.seed(conn)
-        conn.close()
-        self.conn = db.connect()
+    @pytest.fixture(autouse=True)
+    def setup_database(self, conn):
+        self.conn = conn
         self.sm = _ctx("SENIOR")
-
-    def tearDown(self):
-        self.conn.close()
 
     def _hero(self):
         cl = [c for c in services.clusters_view(self.conn) if c["institution"]["aicte_id"] == HERO][0]
