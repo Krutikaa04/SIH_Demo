@@ -1,7 +1,7 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, TrendingUp, X } from 'lucide-react'
-import { api, on } from './api'
+import { api, getRole, on } from './api'
 import { BureauBadge } from './ui'
 
 type Toast = { id: number; kind: 'overlap' | 'info' | 'warn'; title: string; body?: ReactNode; to?: string; cta?: string; band?: string }
@@ -44,8 +44,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     } catch { /* ignore */ }
   }, [push])
 
-  useEffect(() => on('overlap.detected', (d) => d.pair_id && overlapToast(d.pair_id)), [overlapToast])
+  // The server broadcasts to every client; show the red toast only to the roles the overlap concerns.
+  useEffect(() => on('overlap.detected', (d) => {
+    if (!d.pair_id) return
+    const me = getRole()
+    const targets: string[] = d.targets || []
+    if (me.role === 'REGIONAL' ? d.region !== me.region : me.role !== 'SENIOR' && targets.length > 0 && !targets.includes(me.role)) return
+    overlapToast(d.pair_id)
+  }), [overlapToast])
   useEffect(() => on('sla.escalated', (d) => {
+    const me = getRole()
+    if (me.role === 'REGIONAL') return // regional users get region-scoped alerts in the bell instead
+    if (me.role !== 'SENIOR' && d.bureaus && !d.bureaus.includes(me.role)) return
     const esc = (d.escalated || 0) + (d.severe || 0)
     if (!esc && !d.near) return
     push({

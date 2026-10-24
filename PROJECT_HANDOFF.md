@@ -33,14 +33,14 @@ Legend: ✅ built and tested · 🟡 built, simplified on purpose (LITE) · 🎭
 ### Required features
 | # | Feature | Status | Where it lives |
 |---|---|---|---|
-| R1 | Centralized institution profile | ✅ | `pages/Institution.tsx`, `GET /api/institutions/{id}` |
+| R1 | Centralized institution profile | ✅ | `pages/Institution.tsx`, `GET /api/institutions/{id}`, `GET /api/institutions/{id}/history.csv` |
 | R2 | Case tracking (all required fields) | ✅ | `pages/Cases.tsx`, `pages/CaseDetail.tsx`, `GET /api/cases` |
 | R2+ | **Register a complaint** (form with live institution match + overlap preview) and **bulk CSV import** | ✅ | `pages/Register.tsx`, `services.register_complaint()`, `POST /api/complaints*` |
 | R3 | Cross-Bureau overlap detection + linking | ✅ | `backend/app/intel.py`, `pages/Overlaps.tsx`, `pages/Room.tsx` |
 | R4 | Real-time dashboard | 🟡 SSE push + refresh, single process | `pages/Dashboard.tsx`, `events.py`, `GET /api/events` |
 | R5 | Workflow & action history (+ documents) | ✅ / 🟡 docs on local disk, no preview | `POST /api/cases/{id}/actions`, `extras.py` (documents) |
 | R6 | Search & filters (all 8 filters) | ✅ | `Cases.tsx`, `services.case_where()` |
-| R7 | Alerts & notifications | 🟡 in-app only; 🎭 email/SMS not sent | `sla.py`, `pages/Alerts.tsx`, bell in `Layout.tsx` |
+| R7 | Alerts & notifications + simulated outbox | ✅ in-app alerts **targeted to the Bureaus they concern**, "Send reminder" dispatch, auto-queue escalation/reminder alerts, Outbox page with pluggable Notifier | `sla.py`, `notify.py`, `pages/Alerts.tsx`, `pages/Outbox.tsx` |
 | R8 | Reports & analytics (7 reports) | 🟡 fixed set, no custom builder | `reports.py`, `pages/Reports.tsx` |
 
 ### Standout features (A–K) and extras
@@ -226,6 +226,15 @@ No login. The UI sends `X-Role` (`RB|PGRC|AB|LC|VIG|REGIONAL|SENIOR`) and `X-Reg
 - Bureau roles get a **"My desk"** panel on the dashboard; Senior/Regional get the **Daily briefing**.
 - Default role when no header is sent: `SENIOR`. Role is remembered in `localStorage` (`icmd.role`).
 
+### 7.5b Alert visibility (role-targeted alerts)
+Every alert row has `target_bureaus` (stored as `,PGRC,RB,` so membership is `LIKE '%,RB,%'`) and `read_roles` (per-role read state). Producers set the targets: an **overlap** alert targets the Bureaus of *both* cases in the pair; **SLA_NEAR / ESCALATION / PING_PONG** target the case's Bureau (a transfer ping-pong targets the from- and to-Bureau); a **PENDING_REMINDER** digest targets its Bureau; **aggregate digests** (many cases in one tick) target the union of the Bureaus listed. Visibility matrix (`services.alert_filter`):
+| Role | Sees |
+|---|---|
+| SENIOR | every alert |
+| RB / PGRC / AB / LC / VIG | alerts whose `target_bureaus` contains the role, plus untargeted ("global"/legacy) alerts |
+| REGIONAL | alerts about institutions in its region (any Bureau) |
+Read state is **per role**: one Bureau reading a shared alert does not clear it for another, and `POST /api/alerts/read-all` only touches the alerts the caller can see (legacy `is_read=1` still means "read by everyone"). `GET /api/alerts` returns `unread` = all *visible* unread alerts (not limited by `type`/`limit`). The reminder `notify` and `notify/preview` endpoints also require the alert to be visible to the caller. SSE events are still broadcast to every client; `overlap.detected` carries `targets` + `region` and `sla.escalated` carries `bureaus` so `toast.tsx` shows the toast only to the roles concerned (the server remains the source of truth for the list). Existing databases gain the two columns automatically on first connect (NULL targets = visible to all).
+
 ### 7.6 Tamper-evident history (`db.py`)
 `action_history` rows form a **per-case hash chain**: `hash = sha256(prev_hash + canonical JSON of [case_id, seq, ts, actor_id, actor_bureau, action_type, from, to, remarks])`, genesis = 64 zeros. `append_action()` is the **only** writer (the seed uses it too). `verify_chain(case_id=None)` recomputes and reports the first broken record. `POST /api/admin/tamper` does a raw `UPDATE` to demonstrate detection. Uploaded documents' SHA-256 is embedded in the history remark. *Tamper-evident, not tamper-proof* (someone with DB admin rights could recompute the chain).
 
@@ -265,7 +274,7 @@ Rule-based grammar → the same filter params the Cases page uses + a list of **
 | `action_history` | case_id, seq, ts, actor_id/name/bureau, action_type (RECEIVED, ASSIGNED, REMARK, TRANSFER, ESCALATE, AUTO_ESCALATE, DISPOSE, LINKED, COORDINATION, DOC_ADDED), from/to bureau, remarks, prev_hash, hash — unique (case_id, seq) |
 | `overlap_pairs` | id (`PR-0001`), case_a, case_b, institution_id, type, score, band, breakdown (JSON), explanation, headline, cluster_id, status (OPEN/LINKED/RESOLVED/DISMISSED), detected_at |
 | `coordination_rooms` / `room_cases` / `room_comments` | room id (`ROOM-0001`), cluster_id, lead_bureau, status (OPEN/MERGED/RESOLVED), decision (JSON), comments |
-| `alerts` | type (OVERLAP, SLA_NEAR, SLA_BREACH, ESCALATION, PENDING_REMINDER, PING_PONG), severity, case_id, institution_id, pair_id, cluster_id, message, created_at, is_read, link |
+| `alerts` | type (OVERLAP, SLA_NEAR, SLA_BREACH, ESCALATION, PENDING_REMINDER, PING_PONG), severity, case_id, institution_id, pair_id, cluster_id, message, created_at, is_read, link, target_bureaus, read_roles |
 | `documents` | case_id, seq, filename, path, sha256, size, uploaded_by, uploaded_at (files under `data/uploads/<case>/`) |
 | `settings` | key/value: `clock_offset_days`, `cluster_seq`, `pair_seq`, `room_seq`, `sim_counter`, `reminder_day` |
 
@@ -288,7 +297,7 @@ Rule-based grammar → the same filter params the Cases page uses + a list of **
 | `GET /institutions?q&region` · `GET /institutions/{aicte_id}` | list with risk; profile with cases, clusters, stats, risk breakdown |
 | `GET /overlaps?status=active\|all` · `GET /overlaps/{pair_id}` | clusters with pairs + breakdowns · one pair |
 | `POST /rooms {cluster_id}` · `GET /rooms/{id}` · `POST /rooms/{id}/comments` · `/lead` · `/decision` | Coordination Room (decision outcomes `MERGE`, `RESOLVE`, `KEEP_SEPARATE`) |
-| `GET /alerts?unread&type&limit` · `POST /alerts/{id}/read` · `POST /alerts/read-all` | alerts (each has a `link`) |
+| `GET /alerts?unread&type&limit` · `POST /alerts/{id}/read` · `POST /alerts/read-all` | alerts **visible to the caller's role** (each has a `link` and `target_bureaus`; `read` is per role; read endpoints 404 for alerts the role cannot see) |
 | `GET /search/nl?q=` | natural-language parse → `{chips, params}` |
 | `GET /reports/{bureau\|region\|institution\|ageing\|disposal\|overlaps\|periodic}?format=json\|csv&period=month\|quarter` | reports |
 | `GET /export/cases?<same filters>` | CSV export of the filtered case list |
@@ -344,7 +353,6 @@ Interactive docs: `http://127.0.0.1:8000/docs` (FastAPI Swagger) while the app r
 - **Weights are hand-set** (calibrated on the test pairs), not learned from feedback; no officer "was this right?" loop.
 - **SLA values are illustrative**; single SLA per Bureau (no per-category/statutory SLAs, no working-day/holiday calendar).
 - **Coordination "merge" is logical** — cases are linked under a lead Bureau (and the guard restricts follower Bureaus), but nothing syncs to systems of record. A room can only be opened from a **detected** cluster: there is **no manual link/unlink** of arbitrary cases yet.
-- **Alerts are not role-targeted:** every role sees every alert (the Regional Office is filtered by region).
 - **PDF has no charts**; no custom report builder, saved filters, or scheduled reports.
 - **Documents:** local disk only, ≤2 MB, no inline preview, no e-signature.
 - **Heatmap is region-level** (no district drill-down). Region names (8) should be verified against AICTE's real regional-office structure.
@@ -367,7 +375,6 @@ Suggested split mirrors the original four tracks. Effort is a rough developer-ho
 **Track B — Intelligence**
 - **Review queue for unresolved/ambiguous institution matches** (park the complaint, let an officer confirm later; reuse `Registry.suggest`) (3 h).
 - **Manual link/unlink of cases** and add/remove case in a Coordination Room (2 h).
-- **Role-targeted alerts** (RB sees alerts about RB cases and overlaps it is part of) (1 h).
 - **Officer feedback on overlaps** ("was this right?" thumbs) storing labels; script to re-tune weights/thresholds (3–4 h).
 - Multilingual (Hindi) matching via on-prem embeddings, e.g. MuRIL/IndicBERT (research, 6+ h).
 - Add more labelled pairs + edge cases to `test_prototype.py` as the data grows.
@@ -399,6 +406,7 @@ Suggested split mirrors the original four tracks. Effort is a rough developer-ho
 | Add a workflow **action** | extend `ACTION_LABEL` + branch in `case_action` (`main.py`), permission in `roles.allowed_actions`, button in `CaseDetail.tsx` |
 | Add a **role** | add to `roles.PERSONAS` / `ROLE_LABELS`, update `allowed_actions`; the dropdown reads `/api/meta` |
 | Add an **institution field** | `db.SCHEMA` + `seed.build_institutions` + `Institution.tsx`, re-seed |
+| Swap in real **SMTP/SMS Notifier** | implement the `Notifier` protocol in `backend/app/notify.py` (`send(self, conn, message)`) and return it in `get_notifier()`; callers invoke `notify.dispatch_notification(...)` without modification |
 | Reset everything | Demo ▾ → Reset demo data, or `python run.py --reseed` |
 
 ---

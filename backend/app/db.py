@@ -60,7 +60,8 @@ CREATE TABLE room_comments (
 );
 CREATE TABLE alerts (
   id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, severity TEXT, case_id TEXT,
-  institution_id TEXT, pair_id TEXT, cluster_id TEXT, message TEXT, created_at TEXT, is_read INTEGER DEFAULT 0, link TEXT
+  institution_id TEXT, pair_id TEXT, cluster_id TEXT, message TEXT, created_at TEXT, is_read INTEGER DEFAULT 0, link TEXT,
+  target_bureaus TEXT, read_roles TEXT
 );
 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE case_number_counters (
@@ -74,6 +75,12 @@ CREATE TABLE documents (
   size INTEGER, uploaded_by TEXT, uploaded_at TEXT
 );
 CREATE INDEX ix_docs_case ON documents(case_id);
+CREATE TABLE outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, alert_id INTEGER, channel TEXT,
+  recipient_role TEXT, recipient_bureau TEXT, subject TEXT, body TEXT,
+  status TEXT DEFAULT 'SIMULATED', created_by TEXT, created_at TEXT
+);
+CREATE INDEX ix_outbox_alert ON outbox(alert_id);
 """
 
 TABLES = [
@@ -89,6 +96,7 @@ TABLES = [
     "settings",
     "case_number_counters",
     "documents",
+    "outbox",
 ]
 
 
@@ -113,7 +121,33 @@ def connect():
         conn.execute("ALTER TABLE overlap_pairs ADD COLUMN review_at TEXT")
     except sqlite3.OperationalError:
         pass
+    for ddl in ("ALTER TABLE alerts ADD COLUMN target_bureaus TEXT", "ALTER TABLE alerts ADD COLUMN read_roles TEXT"):
+        try:  # databases created before role-targeted alerts (issue #12)
+            conn.execute(ddl)
+        except sqlite3.OperationalError:
+            pass
+    try:
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS outbox (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, alert_id INTEGER, channel TEXT,
+          recipient_role TEXT, recipient_bureau TEXT, subject TEXT, body TEXT,
+          status TEXT DEFAULT 'SIMULATED', created_by TEXT, created_at TEXT
+        )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_outbox_alert ON outbox(alert_id)")
+    except sqlite3.OperationalError:
+        pass
     return conn
+
+
+def fmt_targets(bureaus):
+    """Store a set of Bureau codes as ',PGRC,RB,' so membership is a simple LIKE '%,RB,%'. Empty = visible to all."""
+    codes = sorted({b for b in (bureaus or []) if b})
+    return ("," + ",".join(codes) + ",") if codes else ""
+
+
+def parse_targets(value):
+    return [x for x in (value or "").split(",") if x]
 
 
 def get_conn():

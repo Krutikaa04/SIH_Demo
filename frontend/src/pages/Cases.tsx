@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, FileSpreadsheet, GitMerge, Sparkles, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, FileSpreadsheet, GitMerge, Sparkles, X } from 'lucide-react'
 import { api, download, useApi } from '../api'
-import { BureauBadge, Card, ErrorBox, Loading, SlaChip, StatusChip, cx, fmtDate } from '../ui'
+import { BureauBadge, Card, ErrorBox, Loading, SlaChip, StatusChip, ago, cx, fmtDate, fmtTs } from '../ui'
 
-const FILTERS = ['q', 'bureau', 'region', 'category', 'status', 'overdue', 'overlap', 'nearing', 'age_gt', 'age_lt', 'date_from', 'date_to', 'institution_id']
+const FILTERS = ['q', 'bureau', 'region', 'category', 'status', 'overdue', 'overlap', 'nearing', 'age_gt', 'age_lt', 'date_from', 'date_to', 'institution_id', 'sort']
 const filterLabel = (k: string, v: string) => ({
   overdue: 'Beyond timeline', overlap: 'In an overlap', nearing: 'Nearing timeline', age_gt: `Older than ${v} days`,
   age_lt: `Received in last ${v} days`, date_from: `Received from ${v}`, date_to: `Received until ${v}`,
@@ -21,6 +21,32 @@ function Select({ label, value, onChange, options }: any) {
         {options.map((o: any) => <option key={o.v ?? o} value={o.v ?? o}>{o.l ?? o}</option>)}
       </select>
     </label>
+  )
+}
+
+function SortTh({ label, sortKey, currentSort, onSort, className = '' }: { label: string; sortKey: string; currentSort: string; onSort: (key: string) => void; className?: string }) {
+  const isDesc = currentSort === `${sortKey}_desc`
+  const isAsc = currentSort === `${sortKey}_asc`
+  const active = isDesc || isAsc
+  const ariaSort = isAsc ? 'ascending' : isDesc ? 'descending' : 'none'
+
+  const handleClick = () => {
+    if (sortKey === 'due') {
+      onSort(currentSort === 'due_asc' ? 'due_desc' : 'due_asc')
+    } else {
+      onSort(isDesc ? `${sortKey}_asc` : `${sortKey}_desc`)
+    }
+  }
+
+  return (
+    <th scope="col" aria-sort={ariaSort} className={cx('px-4 py-2.5 font-medium', className)}>
+      <button type="button" onClick={handleClick}
+        className={cx('inline-flex items-center gap-1 uppercase tracking-wider text-[11px] transition hover:text-slate-700',
+          active ? 'font-bold text-navy-2' : 'text-slate-400')}>
+        <span>{label}</span>
+        {isAsc ? <ArrowUp size={12} className="text-navy-2" /> : isDesc ? <ArrowDown size={12} className="text-navy-2" /> : <ArrowUpDown size={12} className="opacity-40" />}
+      </button>
+    </th>
   )
 }
 
@@ -54,7 +80,8 @@ export default function Cases() {
   FILTERS.forEach((k) => sp.get(k) && qs.set(k, sp.get(k)!))
   qs.set('page', String(page)); qs.set('page_size', '25')
   const { data, error, loading } = useApi<any>('/cases?' + qs.toString())
-  const active = FILTERS.filter((k) => sp.get(k))
+  const currentSort = sp.get('sort') || 'received_desc'
+  const active = FILTERS.filter((k) => k !== 'sort' && sp.get(k))
   const m = meta.data
 
   return (
@@ -129,7 +156,19 @@ export default function Cases() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wider text-slate-400">
-                  <tr>{['Case ID', 'Institution', 'Category', 'Handled by', 'Status', 'Officer', 'Timeline', 'Received'].map((h) => <th key={h} className="px-4 py-2.5 font-medium">{h}</th>)}</tr>
+                  <tr>
+                    <th scope="col" className="px-4 py-2.5 font-medium">Case ID</th>
+                    <th scope="col" className="px-4 py-2.5 font-medium">Institution</th>
+                    <th scope="col" className="hidden sm:table-cell px-4 py-2.5 font-medium">Category</th>
+                    <th scope="col" className="px-4 py-2.5 font-medium">Handled by</th>
+                    <th scope="col" className="px-4 py-2.5 font-medium">Status</th>
+                    <SortTh label="Severity" sortKey="severity" currentSort={currentSort} onSort={(s) => set('sort', s)} className="hidden sm:table-cell" />
+                    <th scope="col" className="hidden xl:table-cell px-4 py-2.5 font-medium">Officer</th>
+                    <th scope="col" className="hidden md:table-cell px-4 py-2.5 font-medium">Last action</th>
+                    <th scope="col" className="hidden lg:table-cell px-4 py-2.5 font-medium">Next action</th>
+                    <SortTh label="Timeline" sortKey="due" currentSort={currentSort} onSort={(s) => set('sort', s)} />
+                    <SortTh label="Received" sortKey="received" currentSort={currentSort} onSort={(s) => set('sort', s)} />
+                  </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {data.items.map((c: any) => (
@@ -138,11 +177,11 @@ export default function Cases() {
                         <Link to={`/cases/${c.case_id}`} className="font-semibold text-navy-2 hover:underline">{c.case_id}</Link>
                         <div className="num text-[11px] text-slate-400">{c.reference_no}</div>
                       </td>
-                      <td className="max-w-[300px] px-4 py-3">
+                      <td className="max-w-[260px] px-4 py-3">
                         <Link to={`/institutions/${c.institution.aicte_id}`} className="block truncate font-medium text-slate-800 hover:underline">{c.institution.name}</Link>
                         <div className="text-xs text-slate-400">{c.institution.region} · <span className="num">{c.institution.aicte_id}</span></div>
                       </td>
-                      <td className="px-4 py-3 text-slate-600">{c.category}</td>
+                      <td className="hidden sm:table-cell px-4 py-3 text-slate-600">{c.category}</td>
                       <td className="whitespace-nowrap px-4 py-3">
                         <div className="flex items-center gap-1.5"><BureauBadge code={c.bureau} />
                           {c.overlap && c.overlap.status !== 'RESOLVED' && c.overlap.status !== 'DISMISSED' && (
@@ -150,11 +189,26 @@ export default function Cases() {
                         </div>
                       </td>
                       <td className="px-4 py-3"><StatusChip status={c.status} /></td>
-                      <td className="whitespace-nowrap px-4 py-3 text-slate-600">{c.assigned_officer.name}</td>
+                      <td className="hidden sm:table-cell px-4 py-3">
+                        <span className={cx('inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-semibold num',
+                          c.severity >= 4 ? 'bg-red-50 text-red-700 ring-1 ring-red-200' : c.severity === 3 ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200' : 'bg-slate-50 text-slate-600 ring-1 ring-slate-200')}>
+                          {c.severity} / 5
+                        </span>
+                      </td>
+                      <td className="hidden xl:table-cell whitespace-nowrap px-4 py-3 text-slate-600">{c.assigned_officer.name}</td>
+                      <td className="hidden md:table-cell max-w-[200px] px-4 py-3">
+                        <div className="truncate font-medium text-slate-700" title={c.last_action || '—'}>{c.last_action || '—'}</div>
+                        {c.last_action_at && (
+                          <div className="text-[11px] text-slate-400" title={fmtTs(c.last_action_at)}>{ago(c.last_action_at)}</div>
+                        )}
+                      </td>
+                      <td className="hidden lg:table-cell max-w-[180px] px-4 py-3">
+                        <div className="truncate text-slate-600" title={c.next_action || '—'}>{c.next_action || '—'}</div>
+                      </td>
                       <td className="px-4 py-3"><SlaChip sla={c.sla} /></td>
                       <td className="whitespace-nowrap px-4 py-3 text-slate-500">{fmtDate(c.received_on)}</td>
                     </tr>))}
-                  {data.items.length === 0 && <tr><td colSpan={8} className="p-10 text-center text-slate-400">No cases match these filters.</td></tr>}
+                  {data.items.length === 0 && <tr><td colSpan={11} className="p-10 text-center text-slate-400">No cases match these filters.</td></tr>}
                 </tbody>
               </table>
             </div>

@@ -12,10 +12,17 @@ WARN, BREACH, SEVERE = 0.75, 1.0, 1.5
 REMINDER_DAYS = 10
 
 
-def _alert(conn, type_, severity, message, case_id=None, inst=None, created_at=None, link=None):
-    conn.execute(
-        "INSERT INTO alerts(type,severity,case_id,institution_id,message,created_at,is_read,link) VALUES(?,?,?,?,?,?,0,?)",
-        (type_, severity, case_id, inst, message, created_at, link))
+def _alert(conn, type_, severity, message, case_id=None, inst=None, created_at=None, link=None, auto_notify=True,
+           targets=None):
+    cur = conn.execute(
+        "INSERT INTO alerts(type,severity,case_id,institution_id,message,created_at,is_read,link,target_bureaus) "
+        "VALUES(?,?,?,?,?,?,0,?,?)",
+        (type_, severity, case_id, inst, message, created_at, link, db.fmt_targets(targets)))
+    alert_id = cur.lastrowid
+    if auto_notify and type_ in ("PENDING_REMINDER", "ESCALATION"):
+        from . import notify
+        notify.queue_alert_notification(conn, alert_id, channel="email", created_by="System (SLA engine)")
+    return alert_id
 
 
 def _officers(conn):
@@ -44,7 +51,7 @@ def _escalate(conn, c, level, officers, stamp):
     return boss["designation"]
 
 
-def tick(conn, notify=True):
+def tick(conn, notify=True, auto_notify=True):
     now_dt = db.now(conn)
     today = now_dt.date()
     stamp = db.iso(now_dt)
@@ -76,7 +83,7 @@ def tick(conn, notify=True):
             sets["pingpong_at"] = stamp
             _alert(conn, "PING_PONG", "MEDIUM",
                    f"{c['case_id']} has been transferred {c['transfer_count']} times — possible ping-pong; fix ownership",
-                   c["case_id"], c["institution_id"], stamp)
+                   c["case_id"], c["institution_id"], stamp, auto_notify=False, targets=[c["bureau_code"]])
             summary["pingpong"] += 1
         if sets:
             conn.execute("UPDATE cases SET " + ",".join(f"{k}=?" for k in sets) + " WHERE case_id=?",
@@ -85,27 +92,30 @@ def tick(conn, notify=True):
     if len(nears) <= 4:
         for c in nears:
             _alert(conn, "SLA_NEAR", "MEDIUM", f"{c['case_id']} is nearing its timeline (due {c['due_date']})",
-                   c["case_id"], c["institution_id"], stamp)
+                   c["case_id"], c["institution_id"], stamp, auto_notify=False, targets=[c["bureau_code"]])
     elif nears:
         _alert(conn, "SLA_NEAR", "MEDIUM", f"{len(nears)} cases are now nearing their prescribed timeline",
-               created_at=stamp, link="/cases?status=Pending")
+                   created_at=stamp, link="/cases?status=Pending", auto_notify=False,
+                   targets=[c["bureau_code"] for c in nears])
     if len(escs) <= 4:
         for c, desig in escs:
             _alert(conn, "ESCALATION", "HIGH", f"{c['case_id']} auto-escalated to {desig} — timeline exceeded",
-                   c["case_id"], c["institution_id"], stamp)
+                   c["case_id"], c["institution_id"], stamp, auto_notify=auto_notify, targets=[c["bureau_code"]])
     elif escs:
         _alert(conn, "ESCALATION", "HIGH", f"{len(escs)} cases auto-escalated — prescribed timeline exceeded",
-               created_at=stamp, link="/cases?status=Escalated")
-    summary["reminders"] = reminder_digest(conn, now_dt)
+               created_at=stamp, link="/cases?status=Escalated", auto_notify=auto_notify,
+               targets=[c["bureau_code"] for c, _ in escs])
+    summary["reminders"] = reminder_digest(conn, now_dt, auto_notify=auto_notify)
     conn.commit()
     if notify and (summary["escalated"] or summary["severe"] or summary["near"] or summary["reminders"]):
+        involved = sorted({c["bureau_code"] for c in nears} | {c["bureau_code"] for c, _ in escs})
         events.publish("sla.escalated", {k: v for k, v in summary.items() if k != "cases"} |
-                       {"cases": summary["cases"][:5]})
+                       {"cases": summary["cases"][:5], "bureaus": involved})
         events.publish("dashboard.invalidate", {})
     return summary
 
 
-def reminder_digest(conn, now_dt):
+def reminder_digest(conn, now_dt, auto_notify=True):
     """One digest alert per Bureau per (demo) day for pending cases with no recent action."""
     day = str(now_dt.date())
     if db.get_setting(conn, "reminder_day") == day:
@@ -118,7 +128,8 @@ def reminder_digest(conn, now_dt):
         if n:
             _alert(conn, "PENDING_REMINDER", "MEDIUM",
                    f"{b}: {n} pending case{'s' if n != 1 else ''} with no action for {REMINDER_DAYS}+ days",
-                   created_at=db.iso(now_dt), link=f"/cases?bureau={b}&status=Pending")
+                   created_at=db.iso(now_dt), link=f"/cases?bureau={b}&status=Pending", auto_notify=auto_notify,
+                   targets=[b])
             made += 1
     db.set_setting(conn, "reminder_day", day)
     return made
@@ -129,7 +140,7 @@ def init_state(conn):
     now_dt = db.now(conn)
     today = now_dt.date()
     stamp = db.iso(now_dt)
-    for c in db.rows(conn, "SELECT case_id,received_on,sla_days,transfer_count FROM cases WHERE status!='Disposed'"):
+    for c in db.rows(conn, "SELECT case_id,received_on,sla_days,transfer_count,bureau_code FROM cases WHERE status!='Disposed'"):
         pct = (today - datetime.strptime(c["received_on"], "%Y-%m-%d").date()).days / c["sla_days"]
         sets = {}
         if pct >= WARN:
@@ -146,5 +157,6 @@ def init_state(conn):
         if c["transfer_count"] >= 3:
             _alert(conn, "PING_PONG", "MEDIUM",
                    f"{c['case_id']} has been transferred {c['transfer_count']} times — possible ping-pong; fix ownership",
-                   c["case_id"], None, db.iso(now_dt - timedelta(hours=11)))
-    reminder_digest(conn, now_dt)
+                   c["case_id"], None, db.iso(now_dt - timedelta(hours=11)), auto_notify=False,
+                   targets=[c["bureau_code"]])
+    reminder_digest(conn, now_dt, auto_notify=False)

@@ -13,8 +13,14 @@ export function exportReportPdf(rep: any) {
   doc.text('Prototype report · synthetic data', 36, 46)
   doc.setTextColor(20); doc.setFont('helvetica', 'bold'); doc.setFontSize(14)
   doc.text(rep.title, 36, 92)
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(100)
-  doc.text(`Scope: ${rep.scope}   ·   Generated: ${rep.generated_at.replace('T', ' ')}`, 36, 108)
+  const filterParts: string[] = []
+  if (rep.filters?.region) filterParts.push(`Region: ${rep.filters.region}`)
+  if (rep.filters?.bureau) filterParts.push(`Bureau: ${rep.filters.bureau}`)
+  if (rep.filters?.date_from) filterParts.push(`From: ${rep.filters.date_from}`)
+  if (rep.filters?.date_to) filterParts.push(`To: ${rep.filters.date_to}`)
+  if (rep.filters?.period) filterParts.push(`Period: ${rep.filters.period}`)
+  const filterText = filterParts.length > 0 ? `   ·   Filters: ${filterParts.join(', ')}` : ''
+  doc.text(`Scope: ${rep.scope}${filterText}   ·   Generated: ${rep.generated_at.replace('T', ' ')}`, 36, 108)
 
   let x = 36
   const bw = (w - 72 - 3 * 10) / 4
