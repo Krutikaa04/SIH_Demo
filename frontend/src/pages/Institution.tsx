@@ -26,7 +26,7 @@ function InstitutionProfile({ institutionId, region }: { institutionId: string; 
 
       <header className="rise grid gap-6 lg:grid-cols-[1fr_auto] lg:items-start">
         <div className="flex gap-4">
-          <div className="hidden h-14 w-14 shrink-0 place-items-center rounded-xl bg-navy text-paper sm:grid"><Building2 size={26} /></div>
+          <div className="hidden h-14 w-14 shrink-0 place-items-center rounded-xl bg-navy text-snow sm:grid"><Building2 size={26} /></div>
           <div className="min-w-0">
             <div className="eyebrow">AICTE ID <span className="font-mono normal-case tracking-normal text-slate-700">{i.aicte_id}</span> · {i.type} · est. {i.est_year}</div>
             <h1 className="font-display mt-1 text-[1.875rem] font-semibold leading-[1.1] text-slate-900 md:text-[2.25rem]">{i.name}</h1>
