@@ -126,6 +126,7 @@ def test_case_guard_is_read_only_after_the_writer_lock_is_acquired(client, as_ro
     deciding, release, guard_read = Event(), Event(), Event()
     original_decision, original_guard = coordination_policy.decision_request, services.coordination_guard
     follower = next(c for c in room["cases"] if c["bureau"] == "PGRC")
+    follower_headers = as_role("PGRC")
 
     def hold_decision(*args):
         result = original_decision(*args)
@@ -145,7 +146,7 @@ def test_case_guard_is_read_only_after_the_writer_lock_is_acquired(client, as_ro
         decision = executor.submit(decide, client, as_role, room)
         assert deciding.wait(5)
         action = executor.submit(client.post, f"/api/cases/{quote(follower['case_id'], safe='')}/actions",
-                                 headers=as_role("PGRC"),
+                                 headers=follower_headers,
                                  json={"type": "transfer", "to_bureau": "AB", "acknowledge_overlap": True})
         try:
             assert not guard_read.wait(0.15)
