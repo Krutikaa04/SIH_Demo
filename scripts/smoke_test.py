@@ -5,6 +5,7 @@ and prints latencies. It RESETS the demo data at the start and at the end, so th
 """
 import base64
 import json
+import os
 import sys
 import time
 import urllib.error
@@ -16,8 +17,29 @@ OK, BAD = "✔", "✘"
 failures = []
 
 
+_SESSIONS = {}
+DEMO_PASSWORD = os.environ.get("AICTE_DEMO_PASSWORD", "Demo@2026")
+
+
+def _username(role, region):
+    return "regional-" + region.lower().replace(" ", "-") if role == "REGIONAL" else role.lower()
+
+
+def _session(role, region):
+    """Sign in as the demo account of this role (once) and keep its session cookie."""
+    key = (role, region if role == "REGIONAL" else "")
+    if key not in _SESSIONS:
+        req = urllib.request.Request(BASE + "/auth/login", method="POST", headers={"Content-Type": "application/json"},
+                                     data=json.dumps({"username": _username(role, region), "password": DEMO_PASSWORD}).encode())
+        with urllib.request.urlopen(req, timeout=60) as r:
+            cookie = next(c for c in r.headers.get_all("Set-Cookie") if c.startswith("icmd_session="))
+            _SESSIONS[key] = cookie.split(";")[0]
+    return _SESSIONS[key]
+
+
 def call(path, method="GET", body=None, role="SENIOR", region="Western", raw=False):
-    h = {"Content-Type": "application/json", "X-Role": role, "X-Region": region}
+    """Every call is made as a really signed-in demo user (the API ignores any role header)."""
+    h = {"Content-Type": "application/json", "Cookie": _session(role, region)}
     req = urllib.request.Request(BASE + path, method=method, headers=h,
                                  data=json.dumps(body).encode() if body is not None else None)
     t = time.time()
@@ -27,6 +49,17 @@ def call(path, method="GET", body=None, role="SENIOR", region="Western", raw=Fal
             return r.status, (data.decode("utf-8-sig") if raw else json.loads(data or b"null")), time.time() - t
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode()[:200], time.time() - t
+
+
+def _status(path, headers=None, method="GET", body=None):
+    """HTTP status of a call made WITHOUT any session cookie."""
+    req = urllib.request.Request(BASE + path, method=method, headers={"Content-Type": "application/json", **(headers or {})},
+                                 data=json.dumps(body).encode() if body is not None else None)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
 
 
 def check(name, cond, extra=""):
@@ -43,6 +76,13 @@ def flow(round_no):
     check("300 cases seeded", d["totals"]["received"] == 300, f"({d['totals']['received']})")
     check("11 open overlap clusters", d["overlap"]["open_clusters"] == 11, f"({d['overlap']['open_clusters']})")
     check("briefing present for Senior", len(d["briefing"]) >= 4)
+
+    check("sign-in: the API refuses callers who are not signed in (401)", _status("/cases?page_size=1") == 401)
+    check("sign-in: a spoofed role header signs nobody in (401)", _status("/users", {"X-Role": "SENIOR"}) == 401)
+    check("sign-in: the live event stream needs a session (401)", _status("/events") == 401)
+    check("sign-in: a wrong password is refused (401)", _status("/auth/login", method="POST", body={"username": "no.such.user", "password": "Wrong-pass1"}) == 401)
+    check("sign-in: a Bureau officer cannot open the user list (403)", call("/users", role="RB")[0] == 403)
+    check("sign-in: Senior Management can list accounts", call("/users")[0] == 200)
 
     _, nl, _ = call("/search/nl?q=" + urllib.parse.quote("pending RB cases in Western region older than 30 days"))
     _, res, _ = call("/cases?page_size=1&" + urllib.parse.urlencode(nl["params"]))

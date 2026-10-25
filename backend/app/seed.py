@@ -8,7 +8,7 @@ import random
 import shutil
 from datetime import datetime, time, timedelta
 
-from . import db, intel
+from . import auth, db, intel
 from . import sla as sla_engine
 from .constants import (BUREAU_CATEGORIES, BUREAU_ORDER, BUREAUS, CATEGORY_GROUP, REGION_STATES, SLA_DAYS)
 
@@ -250,6 +250,7 @@ def build_institutions(rng):
 def seed(conn):
     shutil.rmtree(db.ROOT / "data" / "uploads", ignore_errors=True)
     db.reset_schema(conn)
+    auth.ensure_demo_users(conn)  # sign-in tables survive a reset; this only fills in any missing demo accounts
     rng = random.Random(42)
     now_dt = datetime.now().replace(microsecond=0)
     today = now_dt.date()

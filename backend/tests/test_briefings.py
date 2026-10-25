@@ -217,12 +217,12 @@ def test_regional_api_excludes_other_regions_from_every_count_action_and_citatio
 
 
 @pytest.mark.parametrize("region", ["", "Unknown", "western"])
-def test_regional_missing_or_unknown_region_fails_closed(briefing_db, client, as_role, region):
+def test_regional_missing_or_unknown_region_fails_closed(briefing_db, client, corrupt_regional, region):
     conn = briefing_db
     institution(conn)
     case(conn, "RB/2026/PRIVATE", transfers=3)
     conn.commit()
-    response = client.get("/api/briefings/executive", headers=as_role("REGIONAL", region))
+    response = client.get("/api/briefings/executive", headers=corrupt_regional(region))
     assert response.status_code == 403
     assert "recognized region" in response.json()["detail"]
     assert "PRIVATE" not in response.text

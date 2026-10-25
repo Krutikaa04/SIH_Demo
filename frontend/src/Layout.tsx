@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Bell, BarChart3, Building2, Check, ChevronDown, Clock3, Ellipsis, FilePlus2, FlaskConical, FolderOpen, GitMerge, House, Inbox, Newspaper, Search, Send, Share2, X } from 'lucide-react'
-import { post, setRole, useApi, useRole } from './api'
+import { Bell, KeyRound, LogOut, Users as UsersIcon, BarChart3, Building2, Check, ChevronDown, Clock3, Ellipsis, FilePlus2, FlaskConical, FolderOpen, GitMerge, House, Inbox, Newspaper, Search, Send, Share2, X } from 'lucide-react'
+import { post, signIn, signOut, useApi, useAuth } from './api'
+import { ChangePasswordForm } from './components/ChangePassword'
 import SearchBox from './components/SearchBox'
 import DemoDock from './components/DemoDock'
-import { BUREAU_COLORS, Logo, ago, cx } from './ui'
+import { BUREAU_COLORS, BUREAU_NAMES, Drawer, Logo, ago, cx } from './ui'
 
 type NavItem = { to: string; label: string; icon: any; end?: boolean; badge?: 'overlaps' | 'alerts' | 'unmatched'; hint?: string }
 
@@ -22,6 +23,7 @@ const MORE: NavItem[] = [
   { to: '/galaxy', label: 'Connection map', icon: Share2 },
   { to: '/briefings', label: 'Executive briefing', icon: Newspaper },
   { to: '/outbox', label: 'Sent messages', icon: Send },
+  { to: '/users', label: 'People and access', icon: UsersIcon },
 ]
 
 const monogram = (role: string) => ({ SENIOR: 'SM', REGIONAL: 'RO' } as any)[role] || role.slice(0, 2)
@@ -38,7 +40,10 @@ function Badge({ n, tone }: { n: number; tone: 'overlaps' | 'alerts' | 'unmatche
 export default function Layout() {
   const nav = useNavigate()
   const loc = useLocation()
-  const me = useRole()
+  const { user: account, config } = useAuth()
+  const me = { role: account!.role, region: account!.region }
+  const [pwOpen, setPwOpen] = useState(false)
+  const [switching, setSwitching] = useState('')
   const meta = useApi<any>('/meta', false)
   const overlaps = useApi<any>('/overlaps')
   const alerts = useApi<any>('/alerts?limit=6')
@@ -78,9 +83,9 @@ export default function Layout() {
     unmatched: unmatched.data?.counts?.OPEN || 0,
   }
   const offset = clock.data?.offset_days || 0
-  const roles: any[] = meta.data?.roles || [{ code: 'SENIOR', label: 'Senior Management' }]
-  const roleLabel = roles.find((r) => r.code === me.role)?.label || me.role
-  const more = MORE.filter((n) => !(n.to === '/unmatched' && me.role === 'REGIONAL'))
+  const roleLabel = BUREAU_NAMES[me.role] || me.role
+  const demoAccounts = config?.demo_mode ? (config.demo_accounts || []) : []
+  const more = MORE.filter((n) => !(n.to === '/unmatched' && me.role === 'REGIONAL') && !(n.to === '/users' && me.role !== 'SENIOR'))
   const moreActive = more.some((n) => loc.pathname.startsWith(n.to))
   const moreBadge = counts.alerts + counts.unmatched
 
@@ -182,45 +187,48 @@ export default function Layout() {
                 className="flex items-center gap-2 rounded-full border border-line bg-sheet py-1 pl-1 pr-2.5 shadow-sm transition hover:border-slate-300 md:pr-3">
                 <span className="grid h-7 w-7 place-items-center rounded-full font-mono text-[11px] font-semibold text-white" style={{ background: BUREAU_COLORS[me.role] || '#1b2547' }}>{monogram(me.role)}</span>
                 <span className="hidden text-left leading-tight md:block">
-                  <span className="block text-[11px] text-slate-500">Viewing as</span>
-                  <span className="block max-w-[150px] truncate text-[13px] font-semibold text-slate-800">{roleLabel}{me.role === 'REGIONAL' && me.region ? ` · ${me.region}` : ''}</span>
+                  <span className="block text-[11px] text-slate-500">Signed in</span>
+                  <span className="block max-w-[150px] truncate text-[13px] font-semibold text-slate-800">{account!.display_name}</span>
                 </span>
                 <ChevronDown size={14} className="text-slate-400" />
               </button>
               {acct && (
-                <div className="toast-in absolute right-0 top-12 z-30 w-[min(320px,92vw)] overflow-hidden rounded-xl border border-line bg-sheet shadow-xl">
-                  <div className="border-b border-line bg-slate-100/60 px-4 py-3">
-                    <div className="eyebrow">Who are you in this demo?</div>
-                    <p className="mt-1 text-xs leading-snug text-slate-500">There is no login in the prototype. Pick a role to see the app exactly as that person would.</p>
+                <div className="toast-in absolute right-0 top-12 z-30 w-[min(340px,92vw)] overflow-hidden rounded-xl border border-line bg-sheet shadow-xl">
+                  <div className="flex items-center gap-3 border-b border-line bg-slate-100/60 px-4 py-3.5">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full font-mono text-[13px] font-semibold text-white" style={{ background: BUREAU_COLORS[me.role] || '#1b2547' }}>{monogram(me.role)}</span>
+                    <span className="min-w-0"><span className="block truncate font-display text-[1.0625rem] font-semibold">{account!.display_name}</span>
+                      <span className="block truncate text-[12.5px] text-slate-500">{roleLabel}{me.region ? ` · ${me.region}` : ''} · <span className="font-mono">{account!.username}</span></span></span>
                   </div>
-                  <ul className="max-h-[50vh] overflow-auto p-1.5">
-                    {roles.map((r: any) => (
-                      <li key={r.code}>
-                        <button onClick={() => { setRole({ role: r.code, region: r.code === 'REGIONAL' ? (me.region || 'Western') : '' }); if (r.code !== 'REGIONAL') setAcct(false) }}
-                          className={cx('flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-slate-100', me.role === r.code && 'bg-slate-100')}>
-                          <span className="grid h-7 w-7 place-items-center rounded-full font-mono text-[11px] font-semibold text-white" style={{ background: BUREAU_COLORS[r.code] || '#1b2547' }}>{monogram(r.code)}</span>
-                          <span className="flex-1 font-medium text-slate-800">{r.label}</span>
-                          {me.role === r.code && <Check size={16} className="text-emerald-600" />}
-                        </button>
-                      </li>))}
-                  </ul>
-                  {me.role === 'REGIONAL' && (
-                    <label className="block border-t border-line px-4 py-3 text-sm">
-                      <span className="eyebrow mb-1 block">Region</span>
-                      <select value={me.region} onChange={(e) => setRole({ role: 'REGIONAL', region: e.target.value })} className="field">
-                        {(meta.data?.regions || []).map((r: any) => <option key={r.name} value={r.name}>{r.name}</option>)}
-                      </select>
-                    </label>)}
-                  <button onClick={toggleDemo} role="switch" aria-checked={demo}
-                    className="flex w-full items-center gap-3 border-t border-line px-4 py-3 text-left hover:bg-slate-50">
-                    <span className="flex-1">
-                      <span className="block text-sm font-semibold text-slate-800">Demo mode</span>
-                      <span className="block text-xs text-slate-500">Show presenter controls (new complaint, time jump, reset)</span>
-                    </span>
-                    <span className={cx('relative h-5 w-9 rounded-full transition', demo ? 'bg-emerald-600' : 'bg-slate-300')}>
-                      <span className={cx('absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all', demo ? 'left-[18px]' : 'left-0.5')} />
-                    </span>
-                  </button>
+                  <div className="p-1.5">
+                    <button onClick={() => { setAcct(false); setPwOpen(true) }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-slate-800 hover:bg-slate-100"><KeyRound size={16} className="text-slate-400" /> Change password</button>
+                    <button onClick={() => signOut()} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-slate-800 hover:bg-slate-100"><LogOut size={16} className="text-slate-400" /> Sign out</button>
+                  </div>
+                  {demoAccounts.length > 0 && (
+                    <div className="border-t border-line">
+                      <div className="px-4 pb-1 pt-3"><div className="eyebrow">Switch demo account</div><p className="mt-0.5 text-[11.5px] leading-snug text-slate-500">Signs you out and in as another role (demo mode only).</p></div>
+                      <ul className="max-h-[34vh] overflow-auto p-1.5">
+                        {demoAccounts.filter((a) => (a.role !== 'REGIONAL' || a.region === 'Western') && a.username !== account!.username).map((a) => (
+                          <li key={a.username}>
+                            <button disabled={!!switching} onClick={async () => { setSwitching(a.username); try { await signIn(a.username, config!.demo_password || ''); setAcct(false) } catch { /* shown by the next request */ } finally { setSwitching('') } }}
+                              className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-slate-100 disabled:opacity-50">
+                              <span className="grid h-7 w-7 place-items-center rounded-full font-mono text-[11px] font-semibold text-white" style={{ background: BUREAU_COLORS[a.role] || '#1b2547' }}>{monogram(a.role)}</span>
+                              <span className="flex-1 font-medium text-slate-800">{a.label}</span>
+                              {switching === a.username && <span className="text-xs text-slate-400">…</span>}
+                            </button>
+                          </li>))}
+                      </ul>
+                    </div>)}
+                  {config?.demo_mode && (
+                    <button onClick={toggleDemo} role="switch" aria-checked={demo}
+                      className="flex w-full items-center gap-3 border-t border-line px-4 py-3 text-left hover:bg-slate-50">
+                      <span className="flex-1">
+                        <span className="block text-sm font-semibold text-slate-800">Demo mode</span>
+                        <span className="block text-xs text-slate-500">Show presenter controls (new complaint, time jump, reset)</span>
+                      </span>
+                      <span className={cx('relative h-5 w-9 rounded-full transition', demo ? 'bg-emerald-600' : 'bg-slate-300')}>
+                        <span className={cx('absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all', demo ? 'left-[18px]' : 'left-0.5')} />
+                      </span>
+                    </button>)}
                 </div>)}
             </div>
           </div>
@@ -275,7 +283,12 @@ export default function Layout() {
           </div>)}
       </div>
 
-      {demo && <DemoDock offset={offset} onClose={toggleDemo} />}
+      {demo && config?.demo_mode && <DemoDock offset={offset} onClose={toggleDemo} />}
+
+      <Drawer open={pwOpen} onClose={() => setPwOpen(false)} width={440}
+        title={<div><div className="eyebrow">Your account</div><div className="font-display text-[1.5rem] font-semibold">Change password</div></div>}>
+        <ChangePasswordForm onDone={() => setTimeout(() => setPwOpen(false), 1800)} />
+      </Drawer>
     </div>
   )
 }
