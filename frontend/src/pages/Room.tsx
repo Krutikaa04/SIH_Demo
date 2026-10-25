@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Check, CheckCircle2, Crown, GitMerge, Lock, Plus, Send, Split, Unlink } from 'lucide-react'
 import { api, post, useApi, useRole } from '../api'
@@ -32,7 +32,17 @@ function Step({ n, done, title, hint, children, locked }: { n: number; done?: bo
 export default function Room() {
   const { id } = useParams()
   const me = useRole()
-  const { data: r, error, loading, reload } = useApi<any>(`/rooms/${id}`)
+  return <RoomContent key={JSON.stringify([id, me.role, me.region])} id={id} />
+}
+
+function RoomContent({ id }: { id: string | undefined }) {
+  const me = useRole()
+  const { data: loadedRoom, error, loading, reload } = useApi<any>(`/rooms/${id}`)
+  const [freshRoom, setFreshRoom] = useState<any>(null)
+  useEffect(() => { setFreshRoom(null) }, [loadedRoom])
+  const r = freshRoom || loadedRoom
+  const pending = useRef(false)
+  const [busy, setBusy] = useState(false)
   const [comment, setComment] = useState('')
   const [outcome, setOutcome] = useState('MERGE')
   const [note, setNote] = useState('')
@@ -44,9 +54,11 @@ export default function Room() {
   const [removing, setRemoving] = useState<string | null>(null)
   const [memberErr, setMemberErr] = useState('')
   const [decideErr, setDecideErr] = useState('')
+  const [commentErr, setCommentErr] = useState('')
   const { data: pool } = useApi<any>(adding && r ? `/cases?institution_id=${encodeURIComponent(r.institution.aicte_id)}&page_size=200` : null, false)
   if (loading && !r) return <Loading />
   if (error && !r) return <ErrorBox msg={error} />
+  if (!r || r.id !== id || (me.role === 'REGIONAL' && (!me.region || r.institution.region !== me.region))) return <Loading />
   const decided = !!r.decision
   const canDecide = me.role === 'SENIOR' || me.role === r.lead_bureau
   const bureaus: string[] = Array.from(new Set(r.cases.map((c: any) => c.bureau)))
@@ -58,27 +70,36 @@ export default function Room() {
   const candidates = (pool?.items || []).filter((c: any) => !members.has(c.case_id) &&
     (!needle || `${c.case_id} ${c.category} ${c.bureau}`.toLowerCase().includes(needle)))
 
+  async function mutate(task: () => Promise<void>, fail: (message: string) => void) {
+    if (pending.current) return
+    pending.current = true
+    setBusy(true)
+    try { await task() } catch (e: any) { fail(e.message) }
+    finally { pending.current = false; setBusy(false) }
+  }
   async function addCase(caseId: string) {
     setMemberErr('')
-    try { await post(`/rooms/${id}/cases`, { case_id: caseId, rationale: reason }); setReason(''); setFind(''); reload() }
-    catch (e: any) { setMemberErr(e.message) }
+    await mutate(async () => { const updated = await post(`/rooms/${id}/cases`, { case_id: caseId, rationale: reason }); reload(); setFreshRoom(updated); setReason(''); setFind('') }, setMemberErr)
   }
   async function removeCase(caseId: string) {
     setMemberErr('')
-    try {
-      await api(`/rooms/${id}/cases/${encodeURIComponent(caseId)}?reason=${encodeURIComponent(removeReason)}`, { method: 'DELETE' })
-      setRemoving(null); setRemoveReason(''); reload()
-    } catch (e: any) { setMemberErr(e.message) }
+    await mutate(async () => {
+      const updated = await api(`/rooms/${id}/cases/${encodeURIComponent(caseId)}?reason=${encodeURIComponent(removeReason)}`, { method: 'DELETE' })
+      reload(); setFreshRoom(updated); setRemoving(null); setRemoveReason('')
+    }, setMemberErr)
   }
   async function send() {
     if (!comment.trim()) return
-    await post(`/rooms/${id}/comments`, { body: comment })
-    setComment(''); reload()
+    setCommentErr('')
+    await mutate(async () => { const updated = await post(`/rooms/${id}/comments`, { body: comment }); reload(); setFreshRoom(updated); setComment('') }, setCommentErr)
+  }
+  async function chooseLead(lead_bureau: string) {
+    setDecideErr('')
+    await mutate(async () => { const updated = await post(`/rooms/${id}/lead`, { lead_bureau }); reload(); setFreshRoom(updated) }, setDecideErr)
   }
   async function decide() {
     setDecideErr('')
-    try { await post(`/rooms/${id}/decision`, { outcome, lead_bureau: r.lead_bureau, note }); reload() }
-    catch (e: any) { setDecideErr(e.message) }
+    await mutate(async () => { const updated = await post(`/rooms/${id}/decision`, { outcome, lead_bureau: r.lead_bureau, note }); reload(); setFreshRoom(updated) }, setDecideErr)
   }
 
   return (
@@ -109,7 +130,7 @@ export default function Room() {
                   {removing === c.case_id && (
                     <div className="flex w-full flex-wrap items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-2.5">
                       <input value={removeReason} onChange={(e) => setRemoveReason(e.target.value)} placeholder="Why does it not belong here? (optional)" className="field !w-auto min-w-0 flex-1 !py-1.5 text-[13px]" />
-                      <button onClick={() => removeCase(c.case_id)} className="btn btn-danger btn-sm">Take it out</button>
+                      <button onClick={() => removeCase(c.case_id)} disabled={busy} className="btn btn-danger btn-sm">Take it out</button>
                       <button onClick={() => setRemoving(null)} className="btn btn-ghost btn-sm">Cancel</button>
                     </div>)}
                 </li>))}
@@ -135,7 +156,7 @@ export default function Room() {
                         <span className="min-w-0 flex-1 truncate text-xs text-slate-500">{c.category}</span>
                         <StatusChip status={c.status} />
                         {elsewhere ? <span className="text-[11px] text-slate-400">already in {elsewhere}</span> : (
-                          <button onClick={() => addCase(c.case_id)} className="btn btn-primary btn-sm">Add</button>)}
+                          <button onClick={() => addCase(c.case_id)} disabled={busy} className="btn btn-primary btn-sm">Add</button>)}
                       </li>)
                   })}
                 </ul>
@@ -146,7 +167,7 @@ export default function Room() {
             hint="The lead Bureau drives one line of action. The others share what they know and avoid sending parallel notices.">
             <div className="flex flex-wrap gap-2.5">
               {bureaus.map((b) => (
-                <button key={b} disabled={decided || !canLead} onClick={async () => { await post(`/rooms/${id}/lead`, { lead_bureau: b }); reload() }} aria-pressed={r.lead_bureau === b}
+                <button key={b} disabled={busy || decided || !canLead} onClick={() => chooseLead(b)} aria-pressed={r.lead_bureau === b}
                   className={cx('flex items-center gap-2.5 rounded-lg border px-4 py-3 text-left transition',
                     r.lead_bureau === b ? 'border-navy bg-navy text-white shadow-md' : 'border-line bg-white hover:border-slate-400', (decided || !canLead) && 'cursor-default opacity-70')}>
                   {r.lead_bureau === b && <Crown size={15} className="text-amber-300" />}
@@ -178,7 +199,7 @@ export default function Room() {
                   <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} className="field"
                     placeholder="For example: RB sends one show-cause notice; PGRC passes on the students’ statements" /></label>
                 {decideErr && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-2.5 text-sm text-red-800" role="alert">{decideErr}</div>}
-                <button onClick={decide} disabled={!canDecide} className="btn btn-primary mt-4 !py-3">Record the decision ({r.lead_bureau} leads)</button>
+                <button onClick={decide} disabled={busy || !canDecide} className="btn btn-primary mt-4 !py-3">{busy ? 'Saving…' : `Record the decision (${r.lead_bureau} leads)`}</button>
                 {!canDecide && <p className="mt-2 text-[13px] text-slate-500">Only the lead Bureau ({r.lead_bureau}) or Senior Management can record the decision.</p>}
               </>)}
           </Step>
@@ -199,8 +220,9 @@ export default function Room() {
               <div className="mt-3 flex gap-2">
                 <input value={comment} onChange={(e) => setComment(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && send()} aria-label="Write a message"
                   placeholder="Write a message to the other Bureaus…" className="field min-w-0 flex-1" />
-                <button onClick={send} className="btn btn-primary" aria-label="Send"><Send size={15} /></button>
+                <button onClick={send} disabled={busy || !comment.trim()} className="btn btn-primary" aria-label="Send"><Send size={15} /></button>
               </div>)}
+            {commentErr && <p className="mt-2 text-sm text-red-800" role="alert">{commentErr}</p>}
           </Card>
 
           <Card className="rise rise-2" title="Why these cases are linked">
