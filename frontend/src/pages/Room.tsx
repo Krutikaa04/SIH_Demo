@@ -4,6 +4,7 @@ import { Check, CheckCircle2, Crown, GitMerge, Lock, Plus, Send, Split, Unlink }
 import { api, post, useApi, useRole } from '../api'
 import { BUREAU_NAMES, BureauBadge, Card, ErrorBox, Loading, PageHeader, StatusChip, cx, fmtTs } from '../ui'
 import { BreakdownView } from './Overlaps'
+import CoordinationCommitments from '../components/CoordinationCommitments'
 
 const OUTCOMES = [
   { v: 'MERGE', t: 'One Bureau leads', d: 'The lead Bureau handles the whole matter. The others follow its decisions.', icon: GitMerge },
@@ -203,6 +204,7 @@ function RoomContent({ id }: { id: string | undefined }) {
                 {!canDecide && <p className="mt-2 text-[13px] text-slate-500">Only the lead Bureau ({r.lead_bureau}) or Senior Management can record the decision.</p>}
               </>)}
           </Step>
+          <CoordinationCommitments roomId={id!} />
         </div>
 
         <div className="space-y-6 lg:col-span-2">

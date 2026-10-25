@@ -113,6 +113,7 @@ CREATE INDEX ix_outbox_alert ON outbox(alert_id);
 """ + UNMATCHED_DDL
 
 TABLES = [
+    "coordination_commitments",
     "unmatched_complaints",
     "institutions",
     "officers",
