@@ -1,8 +1,8 @@
-import { StrictMode } from 'react'
+import { Fragment, StrictMode, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import './index.css'
-import { startEvents } from './api'
+import { loadAuth, useAuth } from './api'
 import { ToastProvider } from './toast'
 import Layout from './Layout'
 import Dashboard from './pages/Dashboard'
@@ -18,15 +18,26 @@ import Register from './pages/Register'
 import Galaxy from './pages/Galaxy'
 import Briefings from './pages/Briefings'
 import Outbox from './pages/Outbox'
+import Login from './pages/Login'
+import Users from './pages/Users'
+import ForcePasswordChange from './components/ChangePassword'
 import Unmatched from './pages/Unmatched'
 
-startEvents()
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <BrowserRouter>
-      <ToastProvider>
-        <Routes>
+function Splash() {
+  return <div className="grid min-h-screen place-items-center text-sm text-slate-400" role="status">Loading…</div>
+}
+
+/** Nothing of the app renders until the server confirms a signed-in session. */
+function AuthGate() {
+  const a = useAuth()
+  useEffect(() => { loadAuth() }, [])
+  if (a.status === 'loading') return <Splash />
+  if (a.status === 'anon' || !a.user) return <Login />
+  if (a.user.must_change_password) return <ForcePasswordChange name={a.user.display_name} />
+  return (
+    <Fragment key={a.user.id}>
+      <Routes>
           <Route element={<Layout />}>
             <Route index element={<Dashboard />} />
             <Route path="cases" element={<Cases />} />
@@ -42,10 +53,19 @@ createRoot(document.getElementById('root')!).render(
             <Route path="register" element={<Register />} />
             <Route path="outbox" element={<Outbox />} />
             <Route path="unmatched" element={<Unmatched />} />
+            <Route path="users" element={<Users />} />
           </Route>
-        </Routes>
+      </Routes>
+    </Fragment>
+  )
+}
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <BrowserRouter>
+      <ToastProvider>
+        <AuthGate />
       </ToastProvider>
     </BrowserRouter>
   </StrictMode>,
 )
-

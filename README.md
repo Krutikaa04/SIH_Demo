@@ -15,6 +15,12 @@ python run.py                     # seeds the demo DB on first run, opens http:/
 
 Options: `python run.py --reseed` (rebuild the demo data), `python run.py --no-browser`.
 
+**Signing in.** Everything needs a signed-in account. In the default demo mode the sign-in page lists one account per role, all with the
+password `Demo@2026` (usernames `rb`, `pgrc`, `ab`, `lc`, `vig`, `senior`, `regional-western`, ...). For anything real run with
+`AICTE_DEMO_MODE=0`: no demo accounts or presenter endpoints are created and the first start prints a one-time password for a Senior
+`admin` account. Other settings: `AICTE_SESSION_IDLE_HOURS` (8), `AICTE_SESSION_MAX_HOURS` (12), `AICTE_COOKIE_SECURE=1` (behind HTTPS),
+`AICTE_DEMO_PASSWORD`.
+
 The built UI is included in the offline demo bundle published through GitHub Releases. Running the demo from a fresh source checkout requires Node.js to build the frontend. The packaged demo laptop needs Python only.
 
 ## Develop the UI (optional, needs Node 20+)
@@ -40,8 +46,9 @@ Run the backend in another terminal with `python run.py --no-browser`.
 - **Case workflow**: remark, assign, transfer, escalate, dispose; every action is hash-chained, with
   "Verify integrity" and a demo "Tamper with a record" button
 - **Institution risk score** (volume + severity + repeat offences + overdue), colour-coded, with breakdown
-- **Role switcher** (RB, PGRC, AB, LC, VIG, Regional Office, Senior Management): different dashboards and a
-  server-enforced permission matrix (no login in this prototype)
+- **Real sign-in** (hashed passwords, server-side sessions, 15-minute lock-out after five wrong passwords, sign-in audit) with
+  roles RB, PGRC, AB, LC, VIG, Regional Office and Senior Management: different home screens and a server-enforced permission
+  matrix. Senior Management adds and manages accounts on **People and access**
 
 - **Natural-language search** (rule-based, offline): ask e.g. "pending RB cases in Western region older than 30 days";
   the Cases page shows exactly what it understood as chips

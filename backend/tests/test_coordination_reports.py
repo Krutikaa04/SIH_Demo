@@ -156,8 +156,8 @@ def test_regional_and_received_cohort_filters_cover_all_evidence(client, as_role
 
 @pytest.mark.parametrize("region", [None, "Not a region"])
 @pytest.mark.parametrize("format", ["json", "csv"])
-def test_regional_reports_fail_closed_without_a_valid_region(client, as_role, region, format):
-    response = client.get(f"/api/reports/coordination?format={format}", headers=as_role("REGIONAL", region))
+def test_regional_reports_fail_closed_without_a_valid_region(client, corrupt_regional, region, format):
+    response = client.get(f"/api/reports/coordination?format={format}", headers=corrupt_regional(region))
     assert response.status_code == 400
     assert "valid region" in response.json()["detail"]
 

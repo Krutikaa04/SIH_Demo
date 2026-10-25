@@ -24,6 +24,26 @@ CREATE TABLE IF NOT EXISTS unmatched_complaints (
 CREATE INDEX IF NOT EXISTS ix_unmatched_status ON unmatched_complaints(status, bureau);
 """
 
+AUTH_DDL = """
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE COLLATE NOCASE, display_name TEXT NOT NULL,
+  role TEXT NOT NULL, region TEXT, officer_id TEXT, password_hash TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1, must_change_password INTEGER NOT NULL DEFAULT 0, is_demo INTEGER NOT NULL DEFAULT 0,
+  failed_attempts INTEGER NOT NULL DEFAULT 0, locked_until TEXT, last_login_at TEXT, password_changed_at TEXT,
+  created_at TEXT, created_by TEXT
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL, created_at TEXT, last_seen_at TEXT, expires_at TEXT,
+  ip TEXT, user_agent TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_sessions_user ON sessions(user_id);
+CREATE TABLE IF NOT EXISTS auth_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, username TEXT, event TEXT, detail TEXT, ip TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_auth_events_ts ON auth_events(ts);
+"""
+# NOTE: the auth tables are deliberately NOT listed in TABLES, so "Reset demo data" never signs anyone out.
+
 SCHEMA = """
 CREATE TABLE institutions (
   aicte_id TEXT PRIMARY KEY, name TEXT, city TEXT, state TEXT, region TEXT, address TEXT,
@@ -138,6 +158,10 @@ def connect():
             pass
     try:  # databases created before the unmatched-complaint review queue (issue #14)
         conn.executescript(UNMATCHED_DDL)
+    except sqlite3.OperationalError:
+        pass
+    try:  # sign-in tables (users, sessions, auth events); kept across demo resets
+        conn.executescript(AUTH_DDL)
     except sqlite3.OperationalError:
         pass
     try:
