@@ -120,7 +120,7 @@ export default function Room() {
                 <button onClick={() => { setAdding((v) => !v); setMemberErr('') }} className="btn btn-ghost btn-sm"><Plus size={14} /> {adding ? 'Close' : 'Add another case'}</button>
               </div>)}
             {adding && canManage && (
-              <div className="toast-in mt-3 space-y-2 rounded-xl border border-line bg-white p-3.5">
+              <div className="toast-in mt-3 space-y-2 rounded-xl border border-line bg-sheet p-3.5">
                 <div className="text-[13px] font-semibold text-slate-700">Other cases at {r.institution.name}</div>
                 <input value={find} onChange={(e) => setFind(e.target.value)} placeholder="Search by case number, category or Bureau…" className="field" />
                 <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why does it belong here? (optional, recorded on the case)" className="field" />
@@ -148,8 +148,8 @@ export default function Room() {
               {bureaus.map((b) => (
                 <button key={b} disabled={decided || !canLead} onClick={async () => { await post(`/rooms/${id}/lead`, { lead_bureau: b }); reload() }} aria-pressed={r.lead_bureau === b}
                   className={cx('flex items-center gap-2.5 rounded-lg border px-4 py-3 text-left transition',
-                    r.lead_bureau === b ? 'border-navy bg-navy text-white shadow-md' : 'border-line bg-white hover:border-slate-400', (decided || !canLead) && 'cursor-default opacity-70')}>
-                  {r.lead_bureau === b && <Crown size={15} className="text-amber-300" />}
+                    r.lead_bureau === b ? 'border-navy bg-navy text-white shadow-md' : 'border-line bg-sheet hover:border-slate-400', (decided || !canLead) && 'cursor-default opacity-70')}>
+                  {r.lead_bureau === b && <Crown size={15} className="text-[#ffd36b]" />}
                   <span><span className="block font-mono text-[13px] font-semibold">{b}</span><span className={cx('block text-xs', r.lead_bureau === b ? 'text-white/70' : 'text-slate-500')}>{BUREAU_NAMES[b]}</span></span>
                 </button>))}
             </div>
@@ -168,7 +168,7 @@ export default function Room() {
                 <div className="grid gap-2.5 md:grid-cols-3" role="radiogroup" aria-label="Outcome">
                   {OUTCOMES.map((o) => (
                     <button key={o.v} role="radio" aria-checked={outcome === o.v} onClick={() => setOutcome(o.v)}
-                      className={cx('rounded-lg border p-3.5 text-left transition', outcome === o.v ? 'border-navy bg-navy/[.04] ring-2 ring-navy' : 'border-line bg-white hover:border-slate-400')}>
+                      className={cx('rounded-lg border p-3.5 text-left transition', outcome === o.v ? 'border-navy bg-navy/[.04] ring-2 ring-navy' : 'border-line bg-sheet hover:border-slate-400')}>
                       <o.icon size={19} className={outcome === o.v ? 'text-navy' : 'text-slate-400'} />
                       <div className="mt-2 text-[14.5px] font-semibold leading-tight text-slate-900">{o.t}</div>
                       <div className="mt-1 text-[12.5px] leading-snug text-slate-500">{o.d}</div>

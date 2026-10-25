@@ -22,7 +22,7 @@ const plain = (d: string) => {
   if (/^cosine/.test(d)) return terms ? `Both complaints mention: ${terms[1]}` : 'The wording is similar'
   return d
 }
-const strength = (r: number) => (r >= 0.75 ? ['Strong', '#236948'] : r >= 0.4 ? ['Some', '#b76011'] : ['Weak', '#a29c8b'])
+const strength = (r: number) => (r >= 0.75 ? ['Strong', '#10b981'] : r >= 0.4 ? ['Some', '#ff8a1f'] : ['Weak', '#8792b8'])
 
 export function BreakdownView({ pair, bureauOf, onReviewed }: { pair: any; bureauOf: (id: string) => string; onReviewed?: () => void }) {
   const [showText, setShowText] = useState(false)
@@ -75,7 +75,7 @@ export function BreakdownView({ pair, bureauOf, onReviewed }: { pair: any; burea
         </div>
       </div>
       {savedRationale && (
-        <div className="rounded-lg border border-line bg-white p-3 text-[13.5px] text-slate-700">
+        <div className="rounded-lg border border-line bg-sheet p-3 text-[13.5px] text-slate-700">
           <span className="eyebrow mr-2">Recorded reason</span>{savedRationale}
         </div>)}
 
@@ -108,7 +108,7 @@ export function BreakdownView({ pair, bureauOf, onReviewed }: { pair: any; burea
         {showText && <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-slate-100 p-3 text-xs leading-relaxed text-slate-700">{pair.explanation}</pre>}
       </div>
 
-      <div className="space-y-3 rounded-xl border border-line bg-white p-4 shadow-sm">
+      <div className="space-y-3 rounded-xl border border-line bg-sheet p-4 shadow-sm">
         <div>
           <div className="font-display text-[1.0625rem] font-semibold">Your judgement</div>
           <p className="text-[12.5px] text-slate-500">The system suggests; you decide. Saved in the permanent record of both cases.</p>

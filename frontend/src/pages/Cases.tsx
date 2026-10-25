@@ -49,10 +49,10 @@ function SortTh({ label, sortKey, currentSort, onSort, className = '' }: { label
 
 /** Severity at a glance: five pips instead of "4 / 5". */
 function Severity({ n }: { n: number }) {
-  const color = n >= 4 ? '#b93b1f' : n === 3 ? '#d67a17' : '#a29c8b'
+  const color = n >= 4 ? '#ec4658' : n === 3 ? '#ff8a1f' : '#8792b8'
   return (
     <span className="inline-flex items-center gap-[3px]" title={`Severity ${n} of 5`} aria-label={`Severity ${n} of 5`}>
-      {[1, 2, 3, 4, 5].map((i) => <span key={i} className="h-2.5 w-1 rounded-[1px]" style={{ background: i <= n ? color : '#e5dfd0' }} />)}
+      {[1, 2, 3, 4, 5].map((i) => <span key={i} className="h-2.5 w-1 rounded-[1px]" style={{ background: i <= n ? color : 'var(--color-slate-200)' }} />)}
     </span>
   )
 }

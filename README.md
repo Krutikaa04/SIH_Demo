@@ -46,6 +46,7 @@ Run the backend in another terminal with `python run.py --no-browser`.
 - **Case workflow**: remark, assign, transfer, escalate, dispose; every action is hash-chained, with
   "Verify integrity" and a demo "Tamper with a record" button
 - **Institution risk score** (volume + severity + repeat offences + overdue), colour-coded, with breakdown
+- **Signal design**: a midnight sidebar, saffron and cobalt accents, animated figures, and a one-click **dark theme** (moon/sun button, top bar)
 - **Real sign-in** (hashed passwords, server-side sessions, 15-minute lock-out after five wrong passwords, sign-in audit) with
   roles RB, PGRC, AB, LC, VIG, Regional Office and Senior Management: different home screens and a server-enforced permission
   matrix. Senior Management adds and manages accounts on **People and access**

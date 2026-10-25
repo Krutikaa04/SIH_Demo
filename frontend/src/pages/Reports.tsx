@@ -7,8 +7,8 @@ import { exportReportPdf } from '../pdf'
 import { Card, ErrorBox, Loading, PageHeader, RiskBadge, cx } from '../ui'
 
 const PALETTE: Record<string, string> = {
-  '#3b82f6': '#364f8f', '#dc2626': '#b93b1f', '#16a34a': '#2c7f59', '#1d4ed8': '#34508f', '#7c3aed': '#70509e', '#0d9488': '#1f7a6b',
-  '#b45309': '#a8641a', '#be123c': '#b03a2e', '#22c55e': '#2c7f59', '#eab308': '#d9ad1c', '#f97316': '#d67a17', '#2563eb': '#364f8f',
+  '#3b82f6': '#3b5efa', '#dc2626': '#ec4658', '#16a34a': '#10b981', '#1d4ed8': '#3b5efa', '#7c3aed': '#a855f7', '#0d9488': '#10a59b',
+  '#b45309': '#f59e0b', '#be123c': '#e5484d', '#22c55e': '#10b981', '#eab308': '#fbbf24', '#f97316': '#ff8a1f', '#2563eb': '#3b5efa',
 }
 const recolor = (c: string) => PALETTE[c] || c
 
@@ -70,7 +70,7 @@ function RoiCalculator() {
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={[{ name: 'Manual scenario', hours: manualHours }, { name: 'Assisted scenario', hours: assistedHours }]}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5dfd0" />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-line)" />
                 <XAxis dataKey="name" tick={{ fontSize: 11 }} /><YAxis unit="h" tick={{ fontSize: 11 }} />
                 <Tooltip formatter={(value: any) => [`${Number(value).toFixed(1)} hours`, 'Scenario workload']} />
                 <Bar dataKey="hours" fill="#364f8f" radius={[6, 6, 0, 0]} />
@@ -284,13 +284,13 @@ export default function Reports() {
             right={<div className="flex items-center gap-3 text-xs text-slate-400">
               {kind === 'periodic' && (
                 <div className="flex rounded-lg bg-slate-100 p-0.5 text-sm">
-                  {(['month', 'quarter'] as const).map((p) => <button key={p} onClick={() => setParam('period', p)} className={cx('rounded-md px-2.5 py-1 font-medium capitalize', period === p ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500')}>{p}ly</button>)}
+                  {(['month', 'quarter'] as const).map((p) => <button key={p} onClick={() => setParam('period', p)} className={cx('rounded-md px-2.5 py-1 font-medium capitalize', period === p ? 'bg-sheet shadow-sm text-slate-900' : 'text-slate-500')}>{p}ly</button>)}
                 </div>)}
               {rep.scope} · {rep.generated_at.slice(0, 16).replace('T', ' ')}</div>}>
             <div className="h-64">
               <ResponsiveContainer>
                 <BarChart data={chartRows} margin={{ left: -10, top: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5dfd0" />
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-line)" />
                   <XAxis dataKey={rep.chart.x} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} interval={0} angle={rep.rows.length > 8 ? -25 : 0} textAnchor={rep.rows.length > 8 ? 'end' : 'middle'} height={rep.rows.length > 8 ? 60 : 30} />
                   <YAxis tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
                   <Tooltip cursor={{ fill: 'rgba(120,100,50,.07)' }} /><Legend wrapperStyle={{ fontSize: 12 }} />

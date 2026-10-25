@@ -120,7 +120,7 @@ export default function Outbox() {
                         <button
                           type="button"
                           onClick={() => setSelectedItem(m)}
-                          className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                          className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-sheet px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
                         >
                           <Eye size={12} className="text-slate-500" />
                           Details
@@ -188,7 +188,7 @@ export default function Outbox() {
 
             <div>
               <span className="mb-1 block text-xs font-semibold text-slate-700">Subject</span>
-              <div className="rounded-lg border border-slate-200 bg-white p-2.5 text-xs font-medium text-slate-900 shadow-sm">
+              <div className="rounded-lg border border-slate-200 bg-sheet p-2.5 text-xs font-medium text-slate-900 shadow-sm">
                 {selectedItem.subject}
               </div>
             </div>

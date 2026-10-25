@@ -118,7 +118,7 @@ export default function CaseDetail() {
           </h1>
           <p className="mt-1.5 text-[15px] text-slate-600">{c.category} · {c.institution.city}, {c.institution.region} region · received {fmtDate(c.received_on)} via {c.source}</p>
         </div>
-        <div className="rounded-xl border border-line bg-sheet p-4 shadow-sm lg:min-w-[270px]">
+        <div data-theme="dark" className="mesh rounded-2xl p-4 lg:min-w-[280px]">
           <div className="eyebrow">Time left to respond</div>
           <div className="mt-1.5 flex items-baseline gap-3">
             {clock ? <Countdown dueDate={c.expected_disposal} serverNow={clock.now} closed={c.sla.state === 'CLOSED'} /> : <span>—</span>}
@@ -170,7 +170,7 @@ export default function CaseDetail() {
                 <button key={a.k} disabled={!ok} onClick={() => { setAct(a.k); setForm({}); setErr(''); setAck(false) }}
                   title={ok ? undefined : c.status === 'Disposed' ? 'This case is closed' : 'Your role cannot do this on this case'}
                   className={cx('flex items-start gap-3 rounded-lg border p-3 text-left transition',
-                    ok ? 'border-line bg-white hover:-translate-y-0.5 hover:border-navy-2/50 hover:shadow-md' : 'cursor-not-allowed border-line/70 bg-slate-100/50 opacity-55')}>
+                    ok ? 'border-line bg-sheet hover:-translate-y-0.5 hover:border-navy-2/50 hover:shadow-md' : 'cursor-not-allowed border-line/70 bg-slate-100/50 opacity-55')}>
                   <span className={cx('grid h-9 w-9 shrink-0 place-items-center rounded-lg', ok ? 'bg-navy text-white' : 'bg-slate-200 text-slate-400')}><a.icon size={17} /></span>
                   <span><span className="block text-[14px] font-semibold leading-tight text-slate-900">{a.label}</span><span className="mt-0.5 block text-[12px] leading-snug text-slate-500">{a.sub}</span></span>
                 </button>)
@@ -207,7 +207,7 @@ export default function CaseDetail() {
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {e.documents.map((d: any) => (
                         <button key={d.id} onClick={() => download(`/documents/${d.id}/download`, d.filename)}
-                          className="flex items-center gap-1 rounded-md border border-line bg-white px-2 py-0.5 text-[12px] font-medium text-slate-600 hover:bg-slate-50"><Paperclip size={11} />{d.filename}</button>))}
+                          className="flex items-center gap-1 rounded-md border border-line bg-sheet px-2 py-0.5 text-[12px] font-medium text-slate-600 hover:bg-slate-50"><Paperclip size={11} />{d.filename}</button>))}
                     </div>)}
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-3 text-[12px] text-slate-400">
                     <span className="flex items-center gap-1">{e.actor.name === 'System (SLA engine)' ? <Zap size={11} /> : <UserCheck size={11} />}{e.actor.name} · {e.actor.bureau}</span>
@@ -259,7 +259,7 @@ export default function CaseDetail() {
             {uploadErr && <div className="mb-2 rounded-lg bg-red-50 p-2 text-xs text-red-700">{uploadErr}</div>}
             <ul className="space-y-2">
               {(docs?.items || []).map((d: any) => (
-                <li key={d.id} className="flex items-center gap-3 rounded-lg border border-line bg-white p-2.5 text-sm">
+                <li key={d.id} className="flex items-center gap-3 rounded-lg border border-line bg-sheet p-2.5 text-sm">
                   <Paperclip size={15} className="shrink-0 text-slate-400" />
                   <div className="min-w-0 flex-1"><div className="truncate font-medium text-slate-800">{d.filename}</div>
                     <div className="text-[11.5px] text-slate-400">{(d.size / 1024).toFixed(1)} KB · {d.uploaded_by} · {fmtTs(d.uploaded_at)}</div></div>
@@ -331,7 +331,7 @@ export default function CaseDetail() {
         <div className="space-y-4">
           <p className="text-sm leading-relaxed text-slate-600">Use this when you know two complaints belong together but the system did not connect them. Only cases at {c.institution.name} can be linked. The link is written to both cases and starts a coordination issue.</p>
           <input value={linkFind} onChange={(e) => setLinkFind(e.target.value)} placeholder="Search by case number, category or Bureau…" className="field" />
-          <ul className="max-h-72 divide-y divide-line overflow-auto rounded-lg border border-line bg-white">
+          <ul className="max-h-72 divide-y divide-line overflow-auto rounded-lg border border-line bg-sheet">
             {linkable.length === 0 && <li className="p-4 text-sm text-slate-400">{pool ? 'No other cases of this institution match.' : 'Loading…'}</li>}
             {linkable.map((x: any) => {
               const already = !!c.overlap && x.overlap?.cluster_id === c.overlap.cluster_id

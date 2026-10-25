@@ -60,7 +60,7 @@ function ActionItem({ action, hidden }: { action: AgendaItem; hidden?: boolean }
           <div className="text-[12px] text-slate-500"><span className="font-semibold text-slate-700">Who can take this forward:</span> {action.owner.label}</div>
           <div className="flex flex-wrap items-center gap-1.5" aria-label="Supporting evidence">
             {action.evidence.map((item) => <Link key={`${item.kind}:${item.label}`} to={item.url}
-              className="inline-flex max-w-full items-center gap-1 rounded-md border border-line bg-slate-50 px-2 py-1 font-mono text-[11px] text-navy hover:border-slate-400 hover:bg-white">
+              className="inline-flex max-w-full items-center gap-1 rounded-md border border-line bg-slate-50 px-2 py-1 font-mono text-[11px] text-navy hover:border-slate-400 hover:bg-sheet">
               <span className="break-all">{item.label}</span><ArrowUpRight size={11} className="shrink-0" />
             </Link>)}
           </div>
@@ -83,10 +83,10 @@ export default function Briefings() {
   if (!briefing || (role.role === 'REGIONAL' && !role.region) || briefing.region !== expectedRegion) return <Loading />
   const actions = briefing.action_agenda || []
   const figures = [
-    { label: 'Complaints received', value: briefing.total_cases, tone: 'text-paper' },
-    { label: 'Still open', value: briefing.pending_cases, tone: 'text-sky-200' },
-    { label: 'Past their due date', value: briefing.overdue_cases, tone: 'text-red-300' },
-    { label: 'Rooms still open', value: briefing.active_rooms, tone: 'text-amber-200' },
+    { label: 'Complaints received', value: briefing.total_cases, tone: 'text-snow' },
+    { label: 'Still open', value: briefing.pending_cases, tone: 'text-[#a5e9ff]' },
+    { label: 'Past their due date', value: briefing.overdue_cases, tone: 'text-[#ff9aa4]' },
+    { label: 'Rooms still open', value: briefing.active_rooms, tone: 'text-[#ffe29a]' },
   ]
 
   return (
@@ -97,14 +97,14 @@ export default function Briefings() {
           actions={<button onClick={() => window.print()} className="btn btn-ghost"><Printer size={16} /> Print this briefing</button>} />
       </div>
 
-      <div className="rise rounded-xl bg-navy p-6 text-paper shadow-md">
+      <div className="mesh rise overflow-hidden rounded-2xl p-6">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/15 pb-3">
-          <span className="text-[11px] font-bold uppercase tracking-[.14em] text-amber-300">{briefing.scope} · Prototype briefing</span>
-          <span className="text-xs text-paper/70">As of {briefing.generated_at}</span>
+          <span className="text-[11px] font-bold uppercase tracking-[.14em] text-[#ffd36b]">{briefing.scope} · Prototype briefing</span>
+          <span className="text-xs text-snow/70">As of {briefing.generated_at}</span>
         </div>
         <div className="mt-5 grid grid-cols-2 gap-5 sm:grid-cols-4">
           {figures.map((figure) => <div key={figure.label}>
-            <div className="text-[12px] text-paper/70">{figure.label}</div>
+            <div className="text-[12px] text-snow/70">{figure.label}</div>
             <div className={cx('font-display num mt-1 text-[2.25rem] font-semibold leading-none', figure.tone)}>{figure.value}</div>
           </div>)}
         </div>
