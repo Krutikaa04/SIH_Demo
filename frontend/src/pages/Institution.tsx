@@ -1,13 +1,22 @@
 import { Link, useParams } from 'react-router-dom'
 import { Building2, FileSpreadsheet, Mail, MapPin, Phone, Siren, User } from 'lucide-react'
-import { download, useApi } from '../api'
+import { download, useApi, useRole } from '../api'
+import InstitutionAftercare from '../components/InstitutionAftercare'
 import { BureauBadge, Card, ErrorBox, Loading, RISK_COLORS, RiskBadge, SlaChip, Stat, StatusChip, cx, fmtDate } from '../ui'
 
 export default function Institution() {
   const { id } = useParams()
-  const { data, error, loading } = useApi<any>(`/institutions/${id}`)
+  const me = useRole()
+  if (me.role === 'REGIONAL' && !me.region) return <ErrorBox msg="Choose a region to view this institution." />
+  return <InstitutionProfile key={`${id}:${me.role}:${me.region}`} institutionId={id || ''}
+    region={me.role === 'REGIONAL' ? me.region : ''} />
+}
+
+function InstitutionProfile({ institutionId, region }: { institutionId: string; region: string }) {
+  const { data, error, loading } = useApi<any>(`/institutions/${encodeURIComponent(institutionId)}`)
   if (loading && !data) return <Loading />
   if (error && !data) return <ErrorBox msg={error} />
+  if (!data || data.institution.aicte_id !== institutionId || (region && data.institution.region !== region)) return <Loading />
   const { institution: i, cases, clusters, stats, risk } = data
   const active = clusters.filter((c: any) => c.status === 'OPEN' || c.status === 'LINKED')
 
@@ -66,6 +75,8 @@ export default function Institution() {
           </ul>
         </div>
       </Card>
+
+      <InstitutionAftercare institutionId={i.aicte_id} />
 
       <Card className="rise rise-3" title="Every complaint about this institution" subtitle="All Bureaus, newest first" pad={false}
         right={<button onClick={() => download(`/institutions/${i.aicte_id}/history.csv`, `${i.aicte_id}_history.csv`)} className="btn btn-ghost btn-sm"><FileSpreadsheet size={13} className="text-emerald-600" /> Download</button>}>

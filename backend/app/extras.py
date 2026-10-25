@@ -178,3 +178,8 @@ def download_document(doc_id: int, conn=Depends(db.get_conn)):
     if not d or not Path(d["path"]).exists():
         raise HTTPException(404, "document not found")
     return FileResponse(d["path"], filename=d["filename"])
+
+
+from .recurrence import router as aftercare_router
+
+router.include_router(aftercare_router)
