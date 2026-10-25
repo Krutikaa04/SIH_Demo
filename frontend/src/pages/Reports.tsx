@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { FileDown, FileSpreadsheet, Calculator, Clock, Zap, TrendingUp, CheckCircle, X } from 'lucide-react'
-import { download, useApi } from '../api'
+import { download, useApi, useRole } from '../api'
 import { exportReportPdf } from '../pdf'
 import { Card, ErrorBox, Loading, PageHeader, RiskBadge, cx } from '../ui'
 
@@ -16,145 +16,97 @@ const TABS = [
   ['bureau', 'Bureau / Cell-wise'], ['region', 'Region-wise'], ['institution', 'Institution-wise'],
   ['status', 'Status-wise'], ['ageing', 'Pending ageing'],
   ['disposal', 'Disposal rate'], ['overlaps', 'Overlapping cases'], ['periodic', 'Monthly / quarterly'],
-  ['roi', 'Effort saved'],
+  ['coordination', 'Coordination outcomes'], ['roi', 'Workload scenario'],
 ]
 
 function RoiCalculator() {
-  const [complaintCount, setComplaintCount] = useState<number>(300)
-  const [manualMins, setManualMins] = useState<number>(12)
-  const [aiMins, setAiMins] = useState<number>(3)
-
-  const n = complaintCount
-  const pairwiseTotal = Math.round((n * (n - 1)) / 2)
-  const manualHoursTotal = Math.round((pairwiseTotal * manualMins) / 60)
-
-  // Estimated suggested candidate pairs (~10% candidate selection rate or based on heuristic filtering)
-  const suggestedCandidates = Math.max(15, Math.round(n * 0.4))
-  const aiHoursTotal = Math.round((suggestedCandidates * aiMins) / 60)
-  const hoursSaved = Math.max(0, manualHoursTotal - aiHoursTotal)
-  const speedup = aiHoursTotal > 0 ? (manualHoursTotal / aiHoursTotal).toFixed(1) : '100+'
-  const manMonths = (hoursSaved / 160).toFixed(1) // 160 hrs per working month
-
-  const chartData = [
-    { name: 'Manual Pairwise Review', hours: manualHoursTotal, fill: '#b93b1f' },
-    { name: 'AI Candidate Review', hours: aiHoursTotal, fill: '#247a88' },
+  const [complaintCount, setComplaintCount] = useState(300)
+  const [candidateShare, setCandidateShare] = useState(5)
+  const [manualMins, setManualMins] = useState(12)
+  const [assistedMins, setAssistedMins] = useState(3)
+  const pairs = complaintCount * (complaintCount - 1) / 2
+  const candidates = Math.ceil(pairs * candidateShare / 100)
+  const manualHours = pairs * manualMins / 60
+  const assistedHours = candidates * assistedMins / 60
+  const difference = manualHours - assistedHours
+  const fields = [
+    { label: 'Complaints in this scenario', value: complaintCount, set: setComplaintCount, min: 50, max: 1500, step: 25 },
+    { label: 'Assumed candidate pairs (% of all pairs)', value: candidateShare, set: setCandidateShare, min: 0.1, max: 100, step: 0.1 },
+    { label: 'Manual minutes per pair', value: manualMins, set: setManualMins, min: 1, max: 60, step: 1 },
+    { label: 'Assisted review minutes per candidate', value: assistedMins, set: setAssistedMins, min: 1, max: 60, step: 1 },
   ]
-
   return (
-    <div className="space-y-4">
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <div className="rounded-xl bg-sheet p-4 shadow-sm border border-line">
-          <div className="flex items-center gap-1.5 eyebrow">
-            <Clock size={13} className="text-navy" /> Investigator Hours Saved
-          </div>
-          <div className="font-display num mt-1 text-[1.875rem] font-semibold text-emerald-600">
-            {hoursSaved.toLocaleString()} hrs
-          </div>
-          <div className="mt-0.5 text-xs text-slate-500">~{manMonths} officer-months</div>
-        </div>
-
-        <div className="rounded-xl bg-sheet p-4 shadow-sm border border-line">
-          <div className="flex items-center gap-1.5 eyebrow">
-            <Zap size={13} className="text-amber-500" /> Review Speedup
-          </div>
-          <div className="font-display num mt-1 text-[1.875rem] font-semibold text-navy">
-            {speedup}x
-          </div>
-          <div className="mt-0.5 text-xs text-slate-500">Acceleration factor</div>
-        </div>
-
-        <div className="rounded-xl bg-sheet p-4 shadow-sm border border-line">
-          <div className="eyebrow">Pairwise Combinations</div>
-          <div className="font-display num mt-1 text-[1.875rem] font-semibold text-slate-800">
-            {pairwiseTotal.toLocaleString()}
-          </div>
-          <div className="mt-0.5 text-xs text-slate-500">N × (N-1) / 2 comparisons</div>
-        </div>
-
-        <div className="rounded-xl bg-sheet p-4 shadow-sm border border-line">
-          <div className="eyebrow">AI Candidates Evaluated</div>
-          <div className="font-display num mt-1 text-[1.875rem] font-semibold text-cyan-600">
-            {suggestedCandidates}
-          </div>
-          <div className="mt-0.5 text-xs text-slate-500">Pre-filtered high overlaps</div>
-        </div>
+    <div className="space-y-5">
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-relaxed text-amber-950">
+        <strong>Hypothetical workload scenario.</strong> These figures come from your assumptions, not observed officer time.
+        The baseline assumes every possible pair is reviewed manually. Actual teams may review far fewer pairs.
+        <Link className="ml-1 font-semibold underline" to="/reports?kind=coordination">See recorded coordination outcomes.</Link>
       </div>
-
-      {/* Interactive Controls & Chart */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card title="Interactive Volume Simulation" subtitle="Adjust parameters to simulate annual grievance intake">
-          <div className="space-y-4">
-            <div>
-              <div className="flex justify-between text-xs font-semibold text-slate-700">
-                <span>Total Complaints Filed (N):</span>
-                <span className="num font-bold text-navy">{complaintCount} cases</span>
-              </div>
-              <input
-                type="range"
-                min={50}
-                max={1500}
-                step={25}
-                value={complaintCount}
-                onChange={(e) => setComplaintCount(Number(e.target.value))}
-                className="mt-2 w-full cursor-pointer accent-navy"
-              />
-              <div className="flex justify-between text-[10px] text-slate-400">
-                <span>50 dockets</span>
-                <span>500 dockets</span>
-                <span>1,500 dockets</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 pt-2">
-              <div>
-                <label className="block text-xs font-medium text-slate-600">Manual review / pair:</label>
-                <input
-                  type="number"
-                  min={5}
-                  max={30}
-                  value={manualMins}
-                  onChange={(e) => setManualMins(Math.max(1, Number(e.target.value)))}
-                  className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs font-semibold outline-none"
-                />
-                <span className="text-[10px] text-slate-400">Minutes per dossier</span>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600">AI review / candidate:</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={10}
-                  value={aiMins}
-                  onChange={(e) => setAiMins(Math.max(1, Number(e.target.value)))}
-                  className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs font-semibold outline-none"
-                />
-                <span className="text-[10px] text-slate-400">Minutes with drawer</span>
-              </div>
-            </div>
-
-            <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600 space-y-1">
-              <div className="font-semibold text-slate-800">Mathematical Model:</div>
-              <div className="font-mono text-[11px] text-navy">Manual = [N × (N-1) / 2] × 12 mins</div>
-              <div className="font-mono text-[11px] text-cyan-700">AI Candidate = Suggested Pairs × 3 mins</div>
-            </div>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {[
+          ['Assumed manual workload', `${manualHours.toFixed(1)} h`],
+          ['Assumed assisted workload', `${assistedHours.toFixed(1)} h`],
+          ['Scenario difference', `${difference.toFixed(1)} h`],
+          ['Assumed candidate pairs', candidates.toLocaleString()],
+        ].map(([label, value]) => <div key={label} className="rounded-xl border border-line bg-sheet p-4">
+          <div className="eyebrow">{label}</div><div className="mt-2 break-words font-display text-2xl font-semibold num">{value}</div>
+        </div>)}
+      </div>
+      <div className="grid gap-5 lg:grid-cols-2">
+        <Card title="Choose the assumptions" subtitle="Adjust each value to test a different workload">
+          <div className="grid gap-4 sm:grid-cols-2">
+            {fields.map((f) => <label key={f.label} className="text-sm text-slate-600">
+              <span className="mb-1.5 block">{f.label}</span>
+              <input className="field" type="number" value={f.value} min={f.min} max={f.max} step={f.step}
+                onChange={(e) => { const n = Number(e.target.value); if (Number.isFinite(n)) f.set(Math.min(f.max, Math.max(f.min, n))) }} />
+            </label>)}
           </div>
+          <p className="mt-4 text-xs leading-relaxed text-slate-500">
+            All possible pairs = N × (N − 1) ÷ 2 ({pairs.toLocaleString()}). Candidate pairs = all pairs × the assumed percentage, rounded up.
+            Workload = pair count × minutes ÷ 60. A negative difference means more work under the selected assisted-review assumptions.
+          </p>
         </Card>
-
-        <Card title="Hours Required: Manual vs AI" subtitle="Quantifiable investigator workload comparison">
+        <Card title="Scenario comparison" subtitle="Calculated hours under the selected assumptions">
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+              <BarChart data={[{ name: 'Manual scenario', hours: manualHours }, { name: 'Assisted scenario', hours: assistedHours }]}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5dfd0" />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                <YAxis unit="h" tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(value: any) => [`${Number(value).toLocaleString()} hours`, 'Effort']} />
-                <Bar dataKey="hours" radius={[6, 6, 0, 0]} />
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} /><YAxis unit="h" tick={{ fontSize: 11 }} />
+                <Tooltip formatter={(value: any) => [`${Number(value).toFixed(1)} hours`, 'Scenario workload']} />
+                <Bar dataKey="hours" fill="#364f8f" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </Card>
       </div>
+    </div>
+  )
+}
+
+function CoordinationEvidence({ report }: { report: any }) {
+  return (
+    <div className="space-y-5">
+    {report.reviews.length > 0 && <Card title="Officer review records" subtitle="Latest explicit review per pair; each case contains the audit entry">
+      <div className="grid gap-3 md:grid-cols-2">{report.reviews.map((review: any) => <div key={review.pair_id} className="min-w-0 rounded-lg border border-line p-3">
+        <div className="flex flex-wrap items-center gap-2 text-sm"><b>{review.pair_id}</b><span>{review.decision}</span></div>
+        <p className="mt-1 text-xs text-slate-500">{review.reviewed_by} · {review.reviewed_at.slice(0, 16).replace('T', ' ')}</p>
+        <div className="mt-2 flex flex-wrap gap-2">{review.cases.map((c: any) => <Link key={c.label} to={c.href} className="break-all font-mono text-xs text-navy-2 underline">{c.label}</Link>)}</div>
+      </div>)}</div>
+    </Card>}
+    <Card title="Check the room records" subtitle="Open a room or case to inspect the source of these outcomes">
+      {report.evidence.length === 0 ? <p className="text-sm text-slate-500">No coordination rooms in this case cohort yet. Open an overlap and create a room to start recording outcomes.</p> :
+        <div className="grid gap-3 md:grid-cols-2">
+          {report.evidence.map((room: any) => <div key={room.room_id} className="min-w-0 rounded-lg border border-line p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Link to={room.href} className="font-semibold text-navy-2 underline">{room.room_id}</Link>
+              <span className="rounded-full bg-slate-100 px-2 py-1 text-xs">{room.outcome || room.status}</span>
+            </div>
+            <p className="mt-2 break-words text-sm font-semibold">{room.institution}</p>
+            <p className="mt-1 text-xs leading-relaxed text-slate-500">Lead: {room.lead_bureau} · {room.selected_cases} selected cases · {room.pending_followers} pending followers ({room.overdue_followers} past due)</p>
+            <div className="mt-3 flex flex-wrap gap-2">{room.cases.map((c: any) => <Link key={c.label} to={c.href} className="break-all rounded bg-slate-50 px-2 py-1 font-mono text-xs text-navy-2 underline">{c.label}</Link>)}</div>
+          </div>)}
+        </div>}
+    </Card>
     </div>
   )
 }
@@ -174,6 +126,7 @@ export default function Reports() {
     setSp(n, { replace: true })
   }
 
+  const me = useRole()
   const meta = useApi<any>('/meta', false)
   const isRoi = kind === 'roi'
 
@@ -185,7 +138,12 @@ export default function Reports() {
   if (kind === 'periodic') apiParams.set('period', period)
   const qs = apiParams.toString() ? `?${apiParams.toString()}` : ''
 
-  const { data: rep, error, loading } = useApi<any>(!isRoi ? `/reports/${kind}${qs}` : null)
+  const { data: loadedReport, error, loading } = useApi<any>(!isRoi ? `/reports/${kind}${qs}` : null)
+  const expectedRegion = me.role === 'REGIONAL' ? me.region : region
+  const rep = (me.role !== 'REGIONAL' || Boolean(me.region)) && loadedReport?.kind === kind && loadedReport.filters?.region === expectedRegion
+    && loadedReport.filters?.bureau === bureau && loadedReport.filters?.date_from === date_from
+    && loadedReport.filters?.date_to === date_to && loadedReport.filters?.period === (kind === 'periodic' ? period : '')
+    ? loadedReport : null
   const [busy, setBusy] = useState(false)
 
   async function csv() {
@@ -204,7 +162,7 @@ export default function Reports() {
     if (c.key === 'risk_band') return <RiskBadge score={0} band={v} />
     if (c.key === 'risk') return <span className="num font-semibold">{v}</span>
     if (typeof v === 'number') return <span className="num">{v}</span>
-    return v
+    return v ?? '—'
   }
 
   const hasFilters = Boolean(region || bureau || date_from || date_to)
@@ -310,8 +268,9 @@ export default function Reports() {
 
       {isRoi ? (
         <RoiCalculator />
-      ) : loading && !rep ? <Loading /> : error && !rep ? <ErrorBox msg={error} /> : (
+      ) : !rep && (loading || !error) ? <Loading /> : error && !rep ? <ErrorBox msg={error} /> : (
         <>
+          {kind === 'coordination' && <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm leading-relaxed text-slate-700">{rep.methodology}</div>}
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             {rep.summary.map((s: any) => (
               <div key={s.label} className="rounded-xl bg-sheet p-4 shadow-sm border border-line">
@@ -320,6 +279,7 @@ export default function Reports() {
           </div>
 
 
+          {kind === 'coordination' && <CoordinationEvidence report={rep} />}
           <Card title={rep.title}
             right={<div className="flex items-center gap-3 text-xs text-slate-400">
               {kind === 'periodic' && (

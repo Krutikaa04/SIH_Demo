@@ -93,6 +93,7 @@ export default function Analytics({ d }: { d: any }) {
               <div>
                 <div className="font-display num text-lg font-semibold leading-none text-emerald-700">{d.effort_saved.officer_hours}h · {d.effort_saved.days}d</div>
                 <div className="mt-1 text-xs text-emerald-700/80">duplicate effort saved (estimate)</div>
+                <Link to="/reports?kind=coordination" className="mt-2 block text-xs font-semibold text-emerald-800 underline">Check recorded outcomes</Link>
               </div>
             </div>
           </div>

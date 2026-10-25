@@ -48,10 +48,11 @@ Run the backend in another terminal with `python run.py --no-browser`.
 - **India region heatmap** (pending / beyond timeline / average risk) - click a region to open its cases
 - **Reports & analytics**: Bureau-wise, region-wise, institution-wise, status-wise, ageing, disposal rate, overlaps and
   monthly/quarterly with filter bar, each with CSV and PDF export; the case list and institution history also export to CSV
+- **Recorded coordination outcomes**: explicit officer reviews, room decisions, pending followers and decision time with source records; [counting rules](docs/COORDINATION_OUTCOMES.md). [Innovation review and integration findings](docs/INNOVATION_REVIEW.md).
 - **Supporting documents** on cases (upload/download, SHA-256 verified, recorded in the hash-chained history)
 - **Register complaint** (new page): live institution match and overlap preview while typing, plus bulk CSV import (validate first); complaints whose institution cannot be matched can be saved to the **Review queue** and registered later
 - **Coordination guard**: acting on an overlapping case needs a logged acknowledgement; after a MERGE the follower Bureau cannot transfer/escalate/dispose
-- **Daily briefing** for Senior Management / Regional Offices and a "duplicate effort saved" estimate on the dashboard
+- **Daily briefing** for Senior Management / Regional Offices, plus a hypothetical workload scenario with explicit assumptions in Reports
 
 ## Rehearsal & safety net
 
