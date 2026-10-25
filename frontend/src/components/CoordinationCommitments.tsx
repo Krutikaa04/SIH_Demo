@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CheckCircle2, ClipboardList, Plus, X } from 'lucide-react'
 import { post, useApi, useRole } from '../api'
@@ -26,13 +26,15 @@ function CommitmentPanel({ roomId, identity }: { roomId: string; identity: RoleS
   const [completing, setCompleting] = useState<number | null>(null)
   const [evidence, setEvidence] = useState('')
   const [busy, setBusy] = useState(false)
+  const saving = useRef(false)
   const [writeError, setWriteError] = useState('')
   const expectedRegion = identity.role === 'REGIONAL' ? identity.region : ''
   const matches = data?.room_id === roomId && data.role === identity.role && data.scope_region === expectedRegion
     && (identity.role !== 'REGIONAL' || Boolean(identity.region))
 
   async function create() {
-    if (!data || busy) return
+    if (!data || saving.current) return
+    saving.current = true
     setBusy(true); setWriteError('')
     try {
       await post(`/rooms/${encodeURIComponent(roomId)}/commitments`, {
@@ -40,16 +42,17 @@ function CommitmentPanel({ roomId, identity }: { roomId: string; identity: RoleS
       })
       setAdding(false); setTitle(''); setCaseId(''); setDueOn(''); reload()
     } catch (err: unknown) { setWriteError(err instanceof Error ? err.message : 'Could not save the commitment.') }
-    finally { setBusy(false) }
+    finally { saving.current = false; setBusy(false) }
   }
   async function complete(id: number) {
-    if (busy) return
+    if (saving.current) return
+    saving.current = true
     setBusy(true); setWriteError('')
     try {
       await post(`/rooms/${encodeURIComponent(roomId)}/commitments/${id}/complete`, { completion_note: evidence })
       setCompleting(null); setEvidence(''); reload()
     } catch (err: unknown) { setWriteError(err instanceof Error ? err.message : 'Could not record completion.') }
-    finally { setBusy(false) }
+    finally { saving.current = false; setBusy(false) }
   }
 
   if (error) return <Card title="Joint action commitments"><ErrorBox msg={error} /></Card>
