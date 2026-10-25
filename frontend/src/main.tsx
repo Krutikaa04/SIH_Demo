@@ -17,7 +17,7 @@ import Alerts from './pages/Alerts'
 import Reports from './pages/Reports'
 import Register from './pages/Register'
 import Galaxy from './pages/Galaxy'
-import Briefings from './pages/Briefings'
+import AuditVault from './pages/AuditVault'
 import Outbox from './pages/Outbox'
 import Login from './pages/Login'
 import Users from './pages/Users'
@@ -54,6 +54,7 @@ function AuthGate() {
             <Route path="alerts" element={<Alerts />} />
             <Route path="reports" element={<Reports />} />
             <Route path="register" element={<Register />} />
+            <Route path="audit" element={<AuditVault />} />
             <Route path="outbox" element={<Outbox />} />
             <Route path="unmatched" element={<Unmatched />} />
             <Route path="users" element={<Users />} />

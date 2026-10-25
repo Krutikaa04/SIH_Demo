@@ -72,6 +72,7 @@ CREATE TABLE action_history (
   from_bureau TEXT, to_bureau TEXT, remarks TEXT, prev_hash TEXT, hash TEXT,
   UNIQUE(case_id, seq)
 );
+CREATE INDEX ix_action_history_ts ON action_history(ts);
 CREATE TABLE overlap_pairs (
   id TEXT PRIMARY KEY, case_a TEXT, case_b TEXT, institution_id TEXT, type TEXT,
   score REAL, band TEXT, breakdown TEXT, explanation TEXT, headline TEXT,
@@ -149,6 +150,10 @@ def connect():
         conn.execute("ALTER TABLE overlap_pairs ADD COLUMN review_rationale TEXT")
         conn.execute("ALTER TABLE overlap_pairs ADD COLUMN review_by TEXT")
         conn.execute("ALTER TABLE overlap_pairs ADD COLUMN review_at TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_action_history_ts ON action_history(ts)")
     except sqlite3.OperationalError:
         pass
     for ddl in ("ALTER TABLE alerts ADD COLUMN target_bureaus TEXT", "ALTER TABLE alerts ADD COLUMN read_roles TEXT"):

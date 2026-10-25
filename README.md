@@ -43,8 +43,8 @@ Run the backend in another terminal with `python run.py --no-browser`.
 - **Demo mode** (role menu, top right, or Ctrl+Shift+D) shows presenter controls: *File a new complaint* runs a scripted complaint through the real pipeline and fires a live alert
 - **SLA engine & Simulated Outbox**: countdown timers, 75% warnings, auto-escalation at 100% (Deputy Director) and 150% (Director),
   ping-pong transfer alerts, daily pending-reminder digests, and simulated email/SMS reminder dispatch with dedicated Outbox archive. Demo tools > "Jump 7 days ahead" triggers it live
-- **Case workflow**: remark, assign, transfer, escalate, dispose; every action is hash-chained, with
-  "Verify integrity" and a demo "Tamper with a record" button
+- **Case workflow & Audit Vault**: remark, assign, transfer, escalate, dispose; every action is hash-chained
+  in a tamper-evident ledger (`/audit`) with "Verify chain", individual block inspection, and demo "Tamper with a record" button
 - **Institution risk score** (volume + severity + repeat offences + overdue), colour-coded, with breakdown
 - **Signal design**: a midnight sidebar, saffron and cobalt accents, animated figures, and a one-click **dark theme** (moon/sun button, top bar)
 - **Real sign-in** (hashed passwords, server-side sessions, 15-minute lock-out after five wrong passwords, sign-in audit) with

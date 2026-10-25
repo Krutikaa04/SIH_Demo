@@ -52,7 +52,7 @@ Legend: ✅ built and tested · 🟡 built, simplified on purpose (LITE) · 🎭
 | C | Institution risk score | ✅ | `risk.py`; badge + breakdown on profile, list, dashboard |
 | D | Auto-escalation + SLA countdown | ✅ | `sla.py` engine (30 s tick), live `Countdown` component |
 | E | Natural-language search | 🟡 | Rule-based parser `nlsearch.py`; shows "I understood" chips |
-| F | Hash-chained audit trail + verify | ✅ | `db.append_action` / `db.verify_chain`; tamper demo endpoint |
+| F | Hash-chained audit vault + verify | ✅ | `db.append_action` / `db.verify_chain`; `pages/AuditVault.tsx`, `GET /api/audit/ledger`, tamper demo endpoint |
 | G | Simulate New Complaint | ✅ | Real pipeline, 6 scripted scenarios |
 | H | Sign-in + role permissions | ✅ / 🟡 | Real password sign-in with server-side sessions, lock-out and account administration; server-enforced matrix. No SSO/MFA |
 | I | India region heatmap | 🟡 | Region-level choropleth, bundled GeoJSON, 3 metrics |

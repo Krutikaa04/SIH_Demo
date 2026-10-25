@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Bell, BarChart3, Building2, ChevronDown, Clock3, Ellipsis, FilePlus2, FlaskConical, FolderOpen, GitMerge, House, Inbox, KeyRound, LogOut, Moon, Newspaper, Search, Send, Share2, Sun, Users as UsersIcon, X } from 'lucide-react'
+import { Bell, BarChart3, Building2, ChevronDown, Clock3, Ellipsis, FilePlus2, FlaskConical, FolderOpen, GitMerge, House, Inbox, KeyRound, LogOut, Moon, Newspaper, Search, Send, Share2, ShieldCheck, Sun, Users as UsersIcon, X } from 'lucide-react'
 import { post, signIn, signOut, useApi, useAuth } from './api'
 import { ChangePasswordForm } from './components/ChangePassword'
 import SearchBox from './components/SearchBox'
@@ -21,6 +21,7 @@ const MORE: NavItem[] = [
   { to: '/unmatched', label: 'Complaints to match', icon: Inbox, badge: 'unmatched' },
   { to: '/alerts', label: 'All alerts', icon: Bell, badge: 'alerts' },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
+  { to: '/audit', label: 'Audit Vault', icon: ShieldCheck },
   { to: '/galaxy', label: 'Connection map', icon: Share2 },
   { to: '/briefings', label: 'Executive briefing', icon: Newspaper },
   { to: '/outbox', label: 'Sent messages', icon: Send },
