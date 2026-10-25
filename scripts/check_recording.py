@@ -1,26 +1,53 @@
 """Check a running recording instance using GET requests only."""
 import argparse
+from contextlib import contextmanager
+from http.cookiejar import CookieJar
 import json
 import re
 import time
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 
 HERO = "1-4520311"
 MAX_RESPONSE = 8 * 1024 * 1024
 
 
-def reader(base):
+def reader(base, opener=None):
+    opener = opener or build_opener()
     def get(path):
         start = time.monotonic()
-        request = Request(base + path, headers={"X-Role": "SENIOR", "X-Region": ""}, method="GET")
-        with urlopen(request, timeout=8) as response:
+        request = Request(base + path, method="GET")
+        with opener.open(request, timeout=8) as response:
             content = response.read(MAX_RESPONSE + 1)
             if len(content) > MAX_RESPONSE:
                 raise ValueError("Response exceeds the recording-check size limit")
             return response.headers.get("Content-Type", ""), content, round((time.monotonic() - start) * 1000)
     return get
+
+
+@contextmanager
+def demo_reader(base):
+    if urlsplit(base).hostname not in ("127.0.0.1", "localhost", "::1"):
+        raise ValueError("Demo sign-in is supported only on a loopback recording instance")
+    opener = build_opener(HTTPCookieProcessor(CookieJar()))
+    get = reader(base, opener)
+    _, raw, _ = get("/api/auth/config")
+    config = json.loads(raw)
+    if not config.get("demo_mode") or not config.get("demo_password"):
+        raise ValueError("This instance does not expose demo sign-in; no credentials were attempted")
+    request = Request(base + "/api/auth/login", method="POST", headers={"Content-Type": "application/json"},
+                      data=json.dumps({"username": "senior", "password": config["demo_password"]}).encode())
+    with opener.open(request, timeout=8) as response:
+        user = json.load(response)["user"]
+    try:
+        if user.get("role") != "SENIOR":
+            raise ValueError("Recording preflight requires the Senior Management demo account")
+        yield get
+    finally:
+        with opener.open(Request(base + "/api/auth/logout", method="POST", data=b"{}",
+                                 headers={"Content-Type": "application/json"}), timeout=8):
+            pass
 
 
 def inspect(get, innovation=False):
@@ -106,20 +133,30 @@ def inspect(get, innovation=False):
     if innovation:
         check("Innovation features", innovations)
     return {"ready": not any(c["status"] == "FAIL" for c in checks), "checks": checks,
-            "scope": "GET-only recording preflight; no reset, registration, clock or workflow mutations"}
+            "scope": "GET-only operational checks; no reset, registration, clock or workflow mutations"}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("url", nargs="?", default="http://127.0.0.1:8000", help="App root URL, without /api")
     parser.add_argument("--innovation", action="store_true", help="Require the full innovation recording batch")
+    parser.add_argument("--demo-login", action="store_true", help="Sign in/out using the published local demo account; operational checks remain GET-only")
     parser.add_argument("--json", action="store_true", help="Print machine-readable results")
     args = parser.parse_args()
     base = args.url.rstrip("/")
     parsed = urlsplit(base)
     if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.query or parsed.fragment or parsed.path not in ("", "/"):
         parser.error("Use an http(s) app root such as http://127.0.0.1:8000")
-    result = inspect(reader(base), args.innovation)
+    try:
+        if args.demo_login:
+            with demo_reader(base) as get:
+                result = inspect(get, args.innovation)
+            result["scope"] += "; demo sign-in/out records an authentication session only"
+        else:
+            result = inspect(reader(base), args.innovation)
+    except Exception as error:
+        result = {"ready": False, "checks": [{"name": "Demo authentication", "status": "FAIL", "detail": str(error)}],
+                  "scope": "No operational mutations attempted"}
     if args.json:
         print(json.dumps(result, indent=2))
     else:

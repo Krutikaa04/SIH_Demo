@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from check_recording import HERO, inspect
+from check_recording import HERO, demo_reader, inspect
 
 
 class RecordingPreflightTests(unittest.TestCase):
@@ -69,6 +69,11 @@ class RecordingPreflightTests(unittest.TestCase):
         result = inspect(self.get)
         self.assertTrue(result["ready"])
         self.assertTrue(any(c["status"] == "WARN" for c in result["checks"]))
+
+    def test_automatic_demo_signin_refuses_remote_hosts(self):
+        with self.assertRaisesRegex(ValueError, "loopback"):
+            with demo_reader("https://example.com"):
+                self.fail("Remote credentials must never be attempted")
 
 
 if __name__ == "__main__":
