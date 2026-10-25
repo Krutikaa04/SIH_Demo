@@ -4,6 +4,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import './index.css'
 import { loadAuth, useAuth } from './api'
 import { ToastProvider } from './toast'
+import { initTheme } from './theme'
 import Layout from './Layout'
 import Dashboard from './pages/Dashboard'
 import Cases from './pages/Cases'
@@ -23,6 +24,8 @@ import Users from './pages/Users'
 import ForcePasswordChange from './components/ChangePassword'
 import Unmatched from './pages/Unmatched'
 
+
+initTheme()
 
 function Splash() {
   return <div className="grid min-h-screen place-items-center text-sm text-slate-400" role="status">Loading…</div>

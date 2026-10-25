@@ -17,7 +17,7 @@ function Secret({ label, value, onClose }: { label: string; value: string; onClo
       <div className="font-display text-[1.0625rem] font-semibold">{label}</div>
       <p className="mt-1 text-[13px]">Shown once. Give it to the person in person or by phone; they must choose their own password when they first sign in.</p>
       <div className="mt-2.5 flex items-center gap-2">
-        <code className="flex-1 select-all rounded-lg border border-amber-200 bg-white px-3 py-2 font-mono text-[15px] tracking-wide">{value}</code>
+        <code className="flex-1 select-all rounded-lg border border-amber-200 bg-sheet px-3 py-2 font-mono text-[15px] tracking-wide">{value}</code>
         <button className="btn btn-ghost btn-sm" onClick={() => { navigator.clipboard?.writeText(value); setCopied(true) }}>{copied ? <Check size={14} /> : <Copy size={14} />} {copied ? 'Copied' : 'Copy'}</button>
       </div>
       <button onClick={onClose} className="mt-3 text-[12.5px] font-semibold underline">I have noted it</button>
