@@ -65,7 +65,8 @@ class TestOverlapEngine(Base):
     def test_breakdown_is_explainable(self):
         p = db.one(self.conn, "SELECT * FROM overlap_pairs WHERE institution_id=? ORDER BY score DESC", (HERO,))
         view = services.pair_view(p)
-        self.assertEqual([s["signal"] for s in view["breakdown"]], ["identity", "name", "text", "category", "time"])
+        self.assertEqual([s["signal"] for s in view["breakdown"]],
+                         ["identity", "name", "text", "category", "time", "entities"])
         self.assertAlmostEqual(sum(s["points"] for s in view["breakdown"]), p["score"], delta=1)
         self.assertIn("Potential Overlapping Cases", view["headline"])
 

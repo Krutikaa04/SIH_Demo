@@ -55,7 +55,7 @@ function Item({ it, onChanged, onResolved }: { it: any; onChanged: () => void; o
                 <li key={s.institution_id}>
                   <button onClick={() => setPick({ id: s.institution_id, name: s.name })} aria-pressed={pick?.id === s.institution_id}
                     className={cx('flex w-full items-center justify-between rounded-lg border px-3.5 py-2.5 text-left text-sm transition',
-                      pick?.id === s.institution_id ? 'border-navy bg-navy/[.04] ring-2 ring-navy' : 'border-line bg-white hover:border-slate-400')}>
+                      pick?.id === s.institution_id ? 'border-navy bg-navy/[.04] ring-2 ring-navy' : 'border-line bg-sheet hover:border-slate-400')}>
                     <span><span className="font-medium">{s.name}</span><span className="ml-2 text-xs text-slate-400">{s.region}</span></span>
                     <span className="num text-xs text-slate-500">{s.score}% alike</span></button></li>))}
             </ul>
@@ -65,7 +65,7 @@ function Item({ it, onChanged, onResolved }: { it: any; onChanged: () => void; o
               <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Or search the full list by name, city or ID…" className="field !pl-10" /></label>
             {q.trim().length >= 2 && (
-              <ul className="mt-1.5 max-h-44 space-y-0.5 overflow-auto rounded-lg border border-line bg-white p-1">
+              <ul className="mt-1.5 max-h-44 space-y-0.5 overflow-auto rounded-lg border border-line bg-sheet p-1">
                 {(found.data?.items || []).slice(0, 8).map((s: any) => (
                   <li key={s.aicte_id}><button onClick={() => { setPick({ id: s.aicte_id, name: s.name }); setQ('') }}
                     className="w-full rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-slate-100">{s.name} <span className="text-xs text-slate-400">{s.aicte_id}</span></button></li>))}

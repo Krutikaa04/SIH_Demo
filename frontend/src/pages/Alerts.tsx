@@ -131,7 +131,7 @@ export default function Alerts() {
               <b className="text-slate-800">Nothing is actually sent.</b> In this prototype the message is only stored in the app’s own log. No real email or text message leaves the computer.
             </div>
 
-            <div className="rounded-lg border border-line bg-white p-3.5">
+            <div className="rounded-lg border border-line bg-sheet p-3.5">
               <div className="eyebrow">The alert</div>
               <div className="mt-1 text-[15px] font-semibold text-slate-900">{selectedAlert.message}</div>
               <div className="text-[13px] text-slate-500">{[selectedAlert.institution_name, selectedAlert.case_id].filter(Boolean).join(' · ')}</div>
@@ -142,7 +142,7 @@ export default function Alerts() {
               <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Channel">
                 {([['email', Mail, 'Email'], ['sms', MessageSquare, 'Text message']] as const).map(([k, I, l]) => (
                   <button key={k} type="button" role="radio" aria-checked={channel === k} onClick={() => changeChannel(k)}
-                    className={cx('flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-semibold transition', channel === k ? 'border-navy bg-navy/[.04] text-navy ring-2 ring-navy' : 'border-line bg-white text-slate-600 hover:border-slate-400')}>
+                    className={cx('flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-semibold transition', channel === k ? 'border-navy bg-navy/[.04] text-navy ring-2 ring-navy' : 'border-line bg-sheet text-slate-600 hover:border-slate-400')}>
                     <I size={15} /> {l}</button>))}
               </div>
             </div>
@@ -153,8 +153,8 @@ export default function Alerts() {
               {previewLoading ? <div className="rounded-lg border border-line bg-slate-100 p-6 text-center text-sm text-slate-400">Preparing the message…</div>
                 : preview ? (
                   <div className="space-y-2">
-                    <div className="rounded-lg border border-line bg-white p-3 text-sm font-semibold text-slate-800"><span className="font-normal text-slate-400">Subject: </span>{preview.subject}</div>
-                    <pre className="max-h-60 overflow-y-auto whitespace-pre-wrap rounded-lg border border-line bg-white p-3.5 font-sans text-[13.5px] leading-relaxed text-slate-700">{preview.body}</pre>
+                    <div className="rounded-lg border border-line bg-sheet p-3 text-sm font-semibold text-slate-800"><span className="font-normal text-slate-400">Subject: </span>{preview.subject}</div>
+                    <pre className="max-h-60 overflow-y-auto whitespace-pre-wrap rounded-lg border border-line bg-sheet p-3.5 font-sans text-[13.5px] leading-relaxed text-slate-700">{preview.body}</pre>
                   </div>)
                   : <div className="rounded-lg border border-line bg-slate-100 p-4 text-sm text-slate-400">The message could not be prepared.</div>}
             </div>

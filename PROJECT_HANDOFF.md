@@ -54,14 +54,14 @@ Legend: ✅ built and tested · 🟡 built, simplified on purpose (LITE) · 🎭
 | E | Natural-language search | 🟡 | Rule-based parser `nlsearch.py`; shows "I understood" chips |
 | F | Hash-chained audit trail + verify | ✅ | `db.append_action` / `db.verify_chain`; tamper demo endpoint |
 | G | Simulate New Complaint | ✅ | Real pipeline, 6 scripted scenarios |
-| H | Role switcher + permissions | 🟡 | Header-based roles, server-enforced matrix, **no login** |
+| H | Sign-in + role permissions | ✅ / 🟡 | Real password sign-in with server-side sessions, lock-out and account administration; server-enforced matrix. No SSO/MFA |
 | I | India region heatmap | 🟡 | Region-level choropleth, bundled GeoJSON, 3 metrics |
 | J | CSV/PDF export | ✅ CSV / 🟡 PDF (table only, no charts) | `Reports.tsx`, `pdf.ts`, `/api/export/cases` |
 | K1 | Time machine (+7 days) | ✅ | Demo menu; shifts the SLA clock and runs the engine |
 | K2 | "Duplicate effort saved" counter | 🟡 | Estimate with visible assumptions |
 | K3 | Daily briefing + ping-pong detector | 🟡 | Template text from live numbers; ping-pong = ≥3 transfers |
 | K4 | Case-network graph (stretch) | ❌ | Not started |
-| — | Real data ingestion / SSO | 🎭 | Seed data and role switcher stand in |
+| — | Real data ingestion / SSO | 🎭 | Seed data and local accounts stand in |
 
 ---
 
@@ -92,10 +92,10 @@ Legend: ✅ built and tested · 🟡 built, simplified on purpose (LITE) · 🎭
  ┌──────────────────────────────────────────────┐   REST /api/*  ┌────────────────────────────────────────┐
  │ pages: Dashboard · Cases · CaseDetail ·      │ ─────────────► │ FastAPI  (backend/app/main.py, extras) │
  │ Overlaps · Room · Institutions · Reports ·   │ ◄── SSE ────── │   routers, role context (roles.py)     │
- │ Alerts   + toasts, role switcher, Demo menu  │  /api/events   │ services.py  serialisers, read models  │
+ │ Alerts   + toasts, sign-in, Demo mode  │  /api/events   │ services.py  serialisers, read models  │
  └──────────────────────────────────────────────┘                │ intel.py     entity resolution + overlap│
                                                                  │ sla.py       SLA engine (30 s asyncio)  │
- X-Role / X-Region headers on every request                      │ risk.py · reports.py · nlsearch.py      │
+ session cookie on every request                               │ risk.py · reports.py · nlsearch.py      │
                                                                  │ db.py        SQLite + hash chain        │
                                                                  └───────────────┬────────────────────────┘
                                                                                  │ data/demo.db (+ data/uploads/)
@@ -127,7 +127,7 @@ backend/app/
 backend/tests/test_prototype.py  17 regression tests (throw-away DB)
 frontend/src/
   main.tsx                     routes · api.ts fetch wrapper, role store, SSE bus, useApi hook, download()
-  Layout.tsx                   sidebar, header (search, role switcher, Simulate, bell, Demo menu)
+  Layout.tsx                   sidebar, header (search, bell, account menu with sign-out and demo-account switch), Demo mode dock
   toast.tsx                    toast system + overlap / SLA toasts   ·  ui.tsx shared components
   pdf.ts                       jsPDF report export
   components/IndiaMap.tsx      d3-geo heatmap   ·  assets/india-regions.json (simplified GeoJSON, region-tagged)
@@ -197,8 +197,12 @@ Background cases are generated with an **exact collision check** using the real 
 | Text similarity | 25 | TF-IDF cosine (1–2-grams, sublinear tf, domain synonym map e.g. teacher/staff→faculty, fees/refund→fee): `25 × min(1, cosine / 0.10)` |
 | Category | 15 | same category 15 · same category group 9 · shared inferred topic 6 · else 0 |
 | Time window | 15 | ≤30 days apart = 15, linearly to 0 at 180 days |
+| Shared references and amounts | 10 bonus | shared normalized rupee amount +4; exact circular/reference +6; exact roll/registration number +6; combined bonus capped at 10 and available headroom below 100 |
 
 - **Topic gate:** discard if `text_pts + category_pts < 10`.
+- **Entity evidence:** the sixth `entities` signal is always present (zero points without a shared value), with the actual matched amounts/references in its detail. It cannot bypass the institution or topic checks. The original five weights stay unchanged; the rounded score remains capped at 100. Register previews and overlap explanations show the evidence.
+- **Evaluation and limits:** [Entity evaluation](docs/ENTITY_EVALUATION.md) records the scoring decision, reproducible planted-positive/decoy precision and recall, extraction bounds and synthetic-data limitations. Shared amounts/references support review; they do not prove a shared incident or represent a probability.
+- **Existing data:** new complaints and previews use the signal immediately. Stored pair scores are retained; re-seed the synthetic demo (`python run.py --reseed`) to see the Kochi 69→73 promotion and same-amount unrelated-topic decoy.
 - **Bands:** ≥70 **HIGH** ("Potential Overlapping Cases - Coordination Required") · 50–69 **MEDIUM** ("Possible Overlap - Review Recommended") · <50 discarded.
 - **Type:** different current Bureaus → `CROSS_BUREAU`; same Bureau → `DUPLICATE`.
 - **Candidates** (`detect`): same `institution_id`, other case is open **or disposed within 90 days**.
@@ -216,8 +220,18 @@ Background cases are generated with an **exact collision check** using the real 
   - ≥3 transfers → `PING_PONG` alert · reminder digest per Bureau per day (no action ≥10 days).
 - **Demo clock:** `settings.clock_offset_days` is added to "now" everywhere (`db.now`). `POST /api/admin/clock {add_days:7}` moves it. Only **Reset** brings it back.
 
-### 7.5 Roles and permissions (`roles.py`)
-No login. The UI sends `X-Role` (`RB|PGRC|AB|LC|VIG|REGIONAL|SENIOR`) and `X-Region` (for `REGIONAL`); the **server enforces** the matrix:
+### 7.5 Sign-in, roles and permissions (`auth.py`, `auth_routes.py`, `roles.py`)
+**Real sign-in.** Every `/api` route needs a valid session (a global FastAPI dependency, `auth.require_auth`); only `/api/auth/login|logout|me|config` are public. Who you are comes **only** from the session: the old `X-Role` / `X-Region` headers are ignored.
+- **Passwords:** salted PBKDF2-SHA256 (200,000 rounds, standard library, offline). Policy: 8+ characters with letters and numbers, not a common password.
+- **Sessions:** a random 256-bit token in an **HttpOnly, SameSite=Lax** cookie (`icmd_session`; `Secure` on HTTPS or `AICTE_COOKIE_SECURE=1`). The database stores only the token's SHA-256. Idle timeout 8 h (`AICTE_SESSION_IDLE_HOURS`), absolute 12 h (`AICTE_SESSION_MAX_HOURS`), max 5 per user. Sign-out, disabling the user, changing role or changing password end sessions on the server. Timestamps use real wall-clock time, so the demo time machine cannot expire sessions.
+- **Abuse limits:** 5 wrong passwords lock the account for 15 minutes; 30 attempts per 5 minutes per address; unknown users cost the same time as real ones and get the same message. Cross-site writes are refused (`Origin` must match the host). API responses are `no-store`; pages send `nosniff` and `X-Frame-Options: DENY`.
+- **Accounts:** table `users` (role, region for Regional, `must_change_password`, `is_demo`, lock state). Senior Management manages them on **People and access** (`/users`): add a person (a one-time temporary password is shown), reset a password, enable/disable. You cannot disable yourself or the last active Senior. New and reset accounts must choose their own password at first sign-in (every other API call returns `403 PASSWORD_CHANGE_REQUIRED` until they do).
+- **Audit:** `auth_events` records sign-ins, failures, lock-outs, password and account changes (shown to Senior). Case history still records the signed-in person as the actor.
+- **Survives demo resets:** `users`, `sessions` and `auth_events` are not in `db.TABLES`, so *Reset demo data* never signs anyone out.
+- **Demo mode** (`AICTE_DEMO_MODE`, default **on** for the prototype): seeds one account per role (`rb`, `pgrc`, `ab`, `lc`, `vig`, `senior`, `regional-<region>`) with the published password `Demo@2026` (`AICTE_DEMO_PASSWORD`), lists them on the sign-in page, and enables the presenter endpoints (`/api/simulate/complaint`, `/api/admin/*`). **Set `AICTE_DEMO_MODE=0` for anything real:** the accounts are not created, the page lists nothing, the presenter endpoints return 404, and the first start creates a Senior `admin` with a one-time password printed in the console (or `AICTE_BOOTSTRAP_PASSWORD`).
+- **Not built (production):** SSO / e-Office, MFA, password-reset by email, per-district scoping, rate limiting behind a proxy (the address seen is the proxy's).
+
+What each signed-in role may do (unchanged matrix):
 | Role | Reads | Case actions |
 |---|---|---|
 | RB / PGRC / AB / LC / VIG | everything (single window) | remark, assign, transfer, escalate, dispose — **only on cases currently assigned to their Bureau** |
@@ -225,7 +239,7 @@ No login. The UI sends `X-Role` (`RB|PGRC|AB|LC|VIG|REGIONAL|SENIOR`) and `X-Reg
 | SENIOR | everything | remark, escalate (not transfer/dispose) |
 - Coordination Room: any non-regional role can open a room (anyone can comment); **only the lead Bureau or Senior can record the decision**; only participating Bureaus/Senior can set the lead. **Manual links and room membership** ([§7.6d](#76d-manual-links-and-room-membership-linkspy)): Regional never; a Bureau only where it owns one of the cases (or participates in the room); Senior always; a room that already has a decision can be changed by Senior only.
 - Bureau roles get a **"My desk"** panel on the dashboard; Senior/Regional get the **Daily briefing**.
-- Default role when no header is sent: `SENIOR`. Role is remembered in `localStorage` (`icmd.role`).
+- Switching roles in the demo means signing in as another account (account menu → *Switch demo account*).
 
 ### 7.5b Alert visibility (role-targeted alerts)
 Every alert row has `target_bureaus` (stored as `,PGRC,RB,` so membership is `LIKE '%,RB,%'`) and `read_roles` (per-role read state). Producers set the targets: an **overlap** alert targets the Bureaus of *both* cases in the pair; **SLA_NEAR / ESCALATION / PING_PONG** target the case's Bureau (a transfer ping-pong targets the from- and to-Bureau); a **PENDING_REMINDER** digest targets its Bureau; **aggregate digests** (many cases in one tick) target the union of the Bureaus listed. Visibility matrix (`services.alert_filter`):
@@ -291,7 +305,7 @@ Rule-based grammar → the same filter params the Cases page uses + a list of **
 
 ---
 
-## 9. API reference (base `/api`, JSON; headers `X-Role`, `X-Region`)
+## 9. API reference (base `/api`, JSON; every route except `/auth/*` needs the session cookie)
 
 > **Case IDs contain slashes** (`RB/2026/00054`). The routes use `{case_id:path}`; clients should URL-encode (`RB%2F2026%2F00054`). The `extras` router is registered **before** the main routes so `/api/cases/{id}/documents` isn't swallowed by the generic case route — keep that order.
 
@@ -312,6 +326,9 @@ Rule-based grammar → the same filter params the Cases page uses + a list of **
 | `GET /reports/{bureau\|region\|institution\|ageing\|disposal\|overlaps\|periodic}?format=json\|csv&period=month\|quarter` | reports |
 | `GET /export/cases?<same filters>` | CSV export of the filtered case list |
 | `GET /audit/verify?case_id=` | verify the hash chain (all cases if omitted) |
+| `GET /auth/config` · `POST /auth/login {username,password}` · `GET /auth/me` · `POST /auth/logout` | public: sign-in page data (demo accounts only in demo mode) · sets the session cookie · current user · ends the session |
+| `POST /auth/change-password {current_password,new_password}` | any signed-in user (also the only call allowed while a temporary password is in use) |
+| `GET/POST /users` · `PATCH /users/{id}` · `POST /users/{id}/reset-password` · `GET /auth/events` | Senior Management only: list / add accounts · enable, disable, change role · new temporary password · sign-in activity |
 | `POST /complaints/preview` · `POST /complaints` · `POST /complaints/import` | register-form live check (no writes) · register one complaint (`422 UNRESOLVED_INSTITUTION` + suggestions, or `{status:"PARKED",queue_id}` with `park_unmatched:true`) · bulk CSV import (`dry_run`, `park_unmatched`) |
 | `GET /unmatched?status=OPEN\|RESOLVED\|DISCARDED\|ALL` · `POST /unmatched/{id}/resolve {institution_id}` · `DELETE /unmatched/{id}?reason=` | review queue (items + `counts`) · register a parked complaint under the chosen institution (idempotent) · discard with a reason |
 | `POST /simulate/complaint {scenario?:1..6}` | file a scripted complaint through the real pipeline (uses `register_complaint`) |
@@ -323,9 +340,11 @@ Interactive docs: `http://127.0.0.1:8000/docs` (FastAPI Swagger) while the app r
 
 ## 10. Frontend guide
 
-- **Design language: "the case file".** Warm paper background, ink-blue type, one vermilion for what is urgent. Serif (**Newsreader**) for headlines and big figures, **Public Sans** for reading, **IBM Plex Mono** for case numbers. Fonts are self-hosted through `@fontsource*`, so the app stays fully offline. All colour tokens live in `index.css` and **replace Tailwind's stock scales** (`slate`, `red`, `blue`, `emerald`, `indigo`, `sky`, `orange`, `amber`), so existing utilities such as `bg-red-50` automatically pick up the palette; use `.btn .btn-primary|accent|ghost|danger`, `.field`, `.eyebrow`, `.case-id` for the common pieces.
+- **Design language: "Signal".** A control-room look for a national grievance desk: an always-midnight sidebar with the chakra as a watermark, cobalt for action, **saffron** for the one thing to do next, **vermilion only for what is late or in conflict**, and a full **dark theme** (toggle in the top bar, remembered in `localStorage` as `icmd.theme`; `theme.ts`). Type: **Bricolage Grotesque** (headlines and big figures, `font-display`), **Instrument Sans** (reading), **JetBrains Mono** (case numbers), all self-hosted through `@fontsource-variable/*`, so the app stays offline.
+- **Colour system:** `index.css` is **generated** (palettes are plain arrays; the dark map is derived by blending each hue into the dark surface), and it **replaces Tailwind's stock scales** (`slate`, `red`, `orange`, `amber`, `emerald`, `blue`, `indigo`, `sky`). Steps 50-200 are backgrounds and borders, 300+ are text and solids; the same variables are redefined under `[data-theme="dark"]`, so every existing utility flips with the theme. Rules that keep it working: use `bg-sheet` (not `bg-white`) for surfaces, `text-snow` for light text on always-dark panels, and **explicit hex** (e.g. `text-[#ff9aa4]`) for tinted text on `.mesh` or the sign-in page, because those panels stay dark in both themes (put `data-theme="dark"` on any such panel to scope the dark tokens to it). Badges use `tint()` / `inkOf()` from `ui.tsx` (CSS `color-mix`), which adapt to either theme.
+- **Building blocks:** `.mesh` (hero surface), `.glass`, `.topbar-glass`, `.btn .btn-primary|accent|ghost|danger` (gradient with a sheen on hover), `.field`, `.eyebrow`, `.case-id`, `.skeleton`, `.text-gradient`; React helpers `CountUp`, `Sparkline`, `Gauge`, `Chakra`, `Stat`, `PageHeader`, `Card`, `Segmented`, `EmptyState`, `Logo` (two overlapping circles with the overlap in saffron: the product idea). Motion respects `prefers-reduced-motion`.
 - **Layout** (`Layout.tsx`): five main nav items (Home, Cases, Add complaint, Coordination, Institutions) plus a collapsible **More** group (Complaints to match, All alerts, Reports, Connection map, Executive briefing, Sent messages); a bottom tab bar replaces the sidebar below 768 px. The top bar has one **search box** (`components/SearchBox.tsx`: case numbers, institutions, plain-English questions; press `/`), the alert bell and the **role chip** (the old role dropdown). **Demo mode** (a switch in the role menu, or Ctrl+Shift+D) shows `components/DemoDock.tsx` with the presenter controls (new complaint, time jump, audit verify/tamper/restore, reset); it is off by default.
-- **Home** (`pages/Dashboard.tsx`): Bureau officers get a to-do list (overdue / coordinate / due soon) built from `/cases` filters, with the organisation-wide charts folded under "The wider picture"; Senior and Regional get "Today at a glance" with the briefing, four headline figures and the full `components/Analytics.tsx`.
+- **Home** (`pages/Dashboard.tsx`): a hero with the person's name and an on-track gauge; Bureau officers get a to-do list (overdue / coordinate / due soon) built from `/cases` filters, with the organisation-wide charts folded under "The wider picture"; Senior and Regional get "Today at a glance" with the briefing, four headline figures and the full `components/Analytics.tsx`.
 - **Routes** (`main.tsx`): `/` · `/cases` (for a Bureau officer plain `/cases` starts on their own Bureau) · `/cases/<case-id…>` (splat route because IDs have slashes) · `/overlaps` (`?open=OVL-xxxx` opens the Why-flagged drawer) · `/rooms/:id` · `/institutions` · `/institutions/:id` · `/reports` · `/alerts` · `/register` · `/unmatched` · `/galaxy` · `/briefings` · `/outbox`.
 - **Data fetching:** `useApi(path)` (in `api.ts`) fetches and **auto-refreshes on SSE events and on role change**. It sets `data=null` on error so 403/404 show an `ErrorBox`. Use `post()`/`api()` for writes; `download()` for files.
 - **Role:** `useRole()` / `setRole()` (persisted in `localStorage`). Every `api()` call adds the headers. The UI greys out actions using the `allowed_actions` the server returns — the server stays the authority.
@@ -360,7 +379,7 @@ Interactive docs: `http://127.0.0.1:8000/docs` (FastAPI Swagger) while the app r
 ---
 
 ## 13. Not built / known limitations
-- **No authentication** (roles are header-based and server-enforced, but anyone can change the header). Production: AICTE SSO / e-Office, RBAC+ABAC, MFA.
+- **Local accounts only.** Sign-in is real (hashed passwords, server-side sessions, lock-out, audit of sign-ins), but there is no AICTE SSO / e-Office, no MFA and no emailed password reset. Demo mode publishes one shared password; run with `AICTE_DEMO_MODE=0` outside demos.
 - **No email/SMS** — alerts are in-app only; "send reminder" isn't implemented at all (planned as a message preview/outbox mock).
 - **Data is synthetic**; officials can now register complaints and import CSVs, but there are still no live feeds from CPGRAMS/Bureau systems; the institution master is the seeded table.
 - **English only**; no Hindi/regional-language matching.
@@ -432,7 +451,7 @@ Suggested split mirrors the original four tracks. Effort is a rough developer-ho
 Install `requirements-dev.txt` for pytest, HTTP client tests and coverage. Run
 `python -m pytest backend/tests -q --cov=backend/app --cov-report=term-missing`.
 `backend/tests/conftest.py` supplies an isolated database copy per test from one
-session-seeded template, plus `conn`, `client` and `as_role` fixtures. Test modules
+session-seeded template, plus `conn`, `client` (signed in as Senior Management), `anon_client` (no session) and `as_role(role, region)` fixtures. `as_role` returns real session-cookie headers for the demo account of that role, so tests exercise the same sign-in path as the browser; `X-Role` headers no longer mean anything. The conftest lowers the password hashing cost for speed (`AICTE_PBKDF2_ITERS`). Test modules
 must not set `AICTE_DB` at import time. `db.configure(path)` overrides the DB path;
 `db.configure()` restores environment-based configuration. Mark expensive workflow
 tests with `pytest.mark.slow` when appropriate.

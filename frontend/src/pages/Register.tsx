@@ -154,13 +154,13 @@ function SingleForm() {
               <ul className="space-y-1.5">
                 {pv.suggestions.map((s: any) => (
                   <li key={s.institution_id}><button type="button" onClick={() => { set('institution_id', s.institution_id); setManualQ('') }}
-                    className="flex w-full items-center justify-between rounded-lg border border-line bg-white px-3 py-2.5 text-left text-sm transition hover:border-navy-2">
+                    className="flex w-full items-center justify-between rounded-lg border border-line bg-sheet px-3 py-2.5 text-left text-sm transition hover:border-navy-2">
                     <span><span className="font-medium">{s.name}</span><span className="ml-2 text-xs text-slate-400">{s.region}</span></span><span className="num text-xs text-slate-500">{s.score}%</span></button></li>))}
               </ul>
               <div className="mt-2.5">
                 <input value={manualQ} onChange={(e) => setManualQ(e.target.value)} placeholder="Or search the full list by name, city or ID…" className="field" />
                 {manualQ.trim().length >= 2 && (
-                  <ul className="mt-1.5 max-h-44 space-y-0.5 overflow-auto rounded-lg border border-line bg-white p-1">
+                  <ul className="mt-1.5 max-h-44 space-y-0.5 overflow-auto rounded-lg border border-line bg-sheet p-1">
                     {(found.data?.items || []).slice(0, 8).map((s: any) => (
                       <li key={s.aicte_id}><button type="button" onClick={() => { set('institution_id', s.aicte_id); setManualQ('') }} className="w-full rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-slate-100">{s.name} <span className="text-xs text-slate-400">{s.aicte_id}</span></button></li>))}
                   </ul>)}
@@ -180,7 +180,7 @@ function SingleForm() {
             </select></label>
           <div>
             <div><Label hint="How serious it sounds">Seriousness</Label>
-              <div className="grid grid-cols-5 gap-1 rounded-lg border border-slate-300 bg-white p-1" role="radiogroup" aria-label="Seriousness">
+              <div className="grid grid-cols-5 gap-1 rounded-lg border border-slate-300 bg-sheet p-1" role="radiogroup" aria-label="Seriousness">
                 {SEVERITY.map(([n, l]) => (
                   <button type="button" key={n} role="radio" aria-checked={f.severity === n} onClick={() => set('severity', n)} title={`${n} of 5`}
                     className={cx('rounded-md py-2 text-[13px] font-semibold transition', f.severity === n ? (n >= 4 ? 'bg-red-600 text-white' : n === 3 ? 'bg-orange-500 text-white' : 'bg-navy text-white') : 'text-slate-500 hover:bg-slate-100')}>{l}</button>))}
@@ -238,7 +238,7 @@ function SingleForm() {
               <div>
                 <div className="eyebrow mb-2">Already open at this institution · {pv.open_cases.length}{pv.open_cases.length >= 12 ? '+' : ''}</div>
                 {pv.open_cases.length === 0 ? <p className="text-sm text-slate-500">Nothing is open. This would be the first.</p> : (
-                  <ul className="max-h-52 divide-y divide-line overflow-auto rounded-lg border border-line bg-white">
+                  <ul className="max-h-52 divide-y divide-line overflow-auto rounded-lg border border-line bg-sheet">
                     {pv.open_cases.map((c: any) => (
                       <li key={c.case_id} className="flex items-center gap-2 px-3 py-2 text-sm">
                         <BureauBadge code={c.bureau} /><Link to={`/cases/${c.case_id}`} className="case-id text-navy-2 hover:underline">{c.case_id}</Link>
@@ -256,7 +256,7 @@ function SingleForm() {
                   <div className="flex items-center gap-2 font-display text-[1.125rem] font-semibold text-red-800"><Siren size={17} /> Potential Overlapping Cases — Coordination Required</div>
                   <ul className="mt-3 space-y-2">
                     {overlaps.map((o: any) => (
-                      <li key={o.case_id} className="flex items-center gap-3 rounded-lg border border-red-100 bg-white p-2.5">
+                      <li key={o.case_id} className="flex items-center gap-3 rounded-lg border border-red-100 bg-sheet p-2.5">
                         <ScoreRing score={o.score} band={o.band} size={52} />
                         <div className="min-w-0 flex-1 text-sm">
                           <div className="flex items-center gap-2"><BureauBadge code={o.bureau} /><span className="case-id">{o.case_id}</span></div>
@@ -264,6 +264,11 @@ function SingleForm() {
                           <div className="mt-0.5 text-[11.5px] text-slate-500">
                             Similar in: {[...o.breakdown].sort((a: any, b: any) => b.points / b.max - a.points / a.max).slice(0, 2).map((b: any) => b.label.toLowerCase()).join(' and ')}
                           </div>
+                          {o.breakdown.filter((s: any) => s.signal === 'entities' && s.points > 0).map((s: any) => (
+                            <div key={s.signal} className="mt-2 break-words rounded-md bg-emerald-50 px-2 py-1.5 text-xs text-emerald-900">
+                              <div className="font-semibold">Shared details · +{s.points} match points</div>
+                              <div className="mt-0.5">{s.detail}</div>
+                            </div>))}
                         </div>
                       </li>))}
                   </ul>
