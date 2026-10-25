@@ -235,7 +235,7 @@ def test_can_manage_members_flag(conn, client, as_role):
     outsider = next(b for b in BUREAUS if b not in (c1["bureau_code"], c2["bureau_code"]))
     flag = lambda role, region=None: client.get(f"/api/rooms/{room['id']}", headers=as_role(role, region)).json()["can_manage_members"]
     assert flag("SENIOR") and flag(c1["bureau_code"]) and flag(c2["bureau_code"])
-    assert not flag(outsider) and not flag("REGIONAL", "Western")
+    assert not flag(outsider) and not flag("REGIONAL", room["institution"]["region"])
 
 
 def test_decided_room_is_senior_only(conn, client, as_role):

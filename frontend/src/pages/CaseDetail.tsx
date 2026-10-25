@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowRightLeft, Bot, CheckCheck, ChevronDown, Download, FileText, GitMerge, Link2, Lock, MessageSquarePlus, Paperclip, ShieldAlert, ShieldCheck, Siren, Sparkles, TrendingUp, Unlink, Upload, UserCheck, UserPlus, Users, Zap } from 'lucide-react'
 import { api, download, post, useApi, useRole } from '../api'
@@ -34,7 +34,16 @@ function Fact({ label, children }: any) {
 
 export default function CaseDetail() {
   const caseId = useParams()['*'] as string
+  const me = useRole()
+  return <CaseContent key={JSON.stringify([caseId, me.role, me.region])} caseId={caseId} />
+}
+
+function CaseContent({ caseId }: { caseId: string }) {
   const enc = encodeURIComponent(caseId)
+  const pending = useRef(false)
+  const activeView = useRef(true)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { activeView.current = true; return () => { activeView.current = false } }, [])
   const { data: c, error, loading } = useApi<any>(`/cases/${enc}`)
   const { data: h } = useApi<any>(`/cases/${enc}/history`)
   const { data: clock } = useApi<any>('/clock')
@@ -59,6 +68,7 @@ export default function CaseDetail() {
   const { data: pool } = useApi<any>(linking && c ? `/cases?institution_id=${encodeURIComponent(c.institution.aicte_id)}&page_size=200` : null, false)
   if (loading && !c) return <Loading />
   if (error && !c) return <ErrorBox msg={error} />
+  if (!c || c.case_id !== caseId || (me.role === 'REGIONAL' && (!me.region || c.institution.region !== me.region))) return <Loading />
   const ov = c.overlap
   const active = ov && ov.status !== 'RESOLVED' && ov.status !== 'DISMISSED'
   const cluster = (allOv?.items || []).find((x: any) => x.cluster_id === ov?.cluster_id)
@@ -70,11 +80,14 @@ export default function CaseDetail() {
   const linkable = (pool?.items || []).filter((x: any) => x.case_id !== c.case_id &&
     (!linkNeedle || `${x.case_id} ${x.category} ${x.bureau}`.toLowerCase().includes(linkNeedle)))
   async function submitLink() {
+    if (pending.current) return
+    pending.current = true; setBusy(true)
     setLinkErr('')
     try {
       await post('/links', { case_a: c.case_id, case_b: linkTarget, rationale: linkWhy })
       setLinking(false); setLinkTarget(''); setLinkWhy(''); setLinkFind('')
     } catch (e: any) { setLinkErr(e.message) }
+    finally { pending.current = false; setBusy(false) }
   }
   async function verify() { setVer(await api(`/audit/verify?case_id=${enc}`)) }
   const allowed: string[] = c.allowed_actions || []
@@ -83,22 +96,29 @@ export default function CaseDetail() {
   function onFile(e: any) {
     const f: File = e.target.files?.[0]
     e.target.value = ''
-    if (!f) return
+    if (!f || pending.current) return
     setUploadErr('')
     if (f.size > 2 * 1024 * 1024) { setUploadErr('That file is larger than 2 MB.'); return }
+    pending.current = true; setBusy(true)
     const rd = new FileReader()
     rd.onload = async () => {
+      if (!activeView.current) return
       const b64 = String(rd.result).split(',')[1] || ''
       try { await post(`/cases/${enc}/documents`, { filename: f.name, content_base64: b64 }); reloadDocs() } catch (er: any) { setUploadErr(er.message) }
+      finally { pending.current = false; if (activeView.current) setBusy(false) }
     }
+    rd.onerror = () => { pending.current = false; if (activeView.current) { setBusy(false); setUploadErr('The file could not be read. Please try again.') } }
     rd.readAsDataURL(f)
   }
   async function submit() {
+    if (pending.current || !act) return
+    pending.current = true; setBusy(true)
     setErr('')
     try {
       await post(`/cases/${enc}/actions`, { type: act, ...form, acknowledge_overlap: ack })
       setAct(null); setForm({})
     } catch (e: any) { setErr(e.message) }
+    finally { pending.current = false; setBusy(false) }
   }
 
   return (
@@ -167,7 +187,7 @@ export default function CaseDetail() {
             {ACTIONS.map((a) => {
               const ok = allowed.includes(a.k)
               return (
-                <button key={a.k} disabled={!ok} onClick={() => { setAct(a.k); setForm({}); setErr(''); setAck(false) }}
+                <button key={a.k} disabled={busy || !ok} onClick={() => { setAct(a.k); setForm({}); setErr(''); setAck(false) }}
                   title={ok ? undefined : c.status === 'Disposed' ? 'This case is closed' : 'Your role cannot do this on this case'}
                   className={cx('flex items-start gap-3 rounded-lg border p-3 text-left transition',
                     ok ? 'border-line bg-sheet hover:-translate-y-0.5 hover:border-navy-2/50 hover:shadow-md' : 'cursor-not-allowed border-line/70 bg-slate-100/50 opacity-55')}>
@@ -255,7 +275,7 @@ export default function CaseDetail() {
 
           <Card className="rise rise-4" title="Documents"
             right={allowed.includes('remark') ? (
-              <label className="btn btn-ghost btn-sm cursor-pointer"><Upload size={13} /> Add a file<input type="file" className="hidden" onChange={onFile} /></label>) : undefined}>
+              <label className="btn btn-ghost btn-sm cursor-pointer"><Upload size={13} /> Add a file<input type="file" className="hidden" disabled={busy} onChange={onFile} /></label>) : undefined}>
             {uploadErr && <div className="mb-2 rounded-lg bg-red-50 p-2 text-xs text-red-700">{uploadErr}</div>}
             <ul className="space-y-2">
               {(docs?.items || []).map((d: any) => (
@@ -320,7 +340,7 @@ export default function CaseDetail() {
               </label>
             </div>)}
           {err && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">{err}</div>}
-          <button onClick={submit} disabled={needsAck && !ack} className="btn btn-primary w-full !py-3">{current?.confirm}</button>
+          <button onClick={submit} disabled={busy || (needsAck && !ack)} className="btn btn-primary w-full !py-3">{busy ? 'Saving…' : current?.confirm}</button>
           <p className="text-center text-[12px] text-slate-400">Saved with the time and your Bureau, and added to the permanent record.</p>
         </div>
       </Drawer>
@@ -351,7 +371,7 @@ export default function CaseDetail() {
           <label className="block"><span className="mb-1.5 block text-sm font-semibold">Why do these belong together? <span className="ml-1 text-xs font-medium text-red-600">Required</span></span>
             <textarea rows={3} value={linkWhy} onChange={(e) => setLinkWhy(e.target.value)} placeholder="This is written to both cases" className="field" /></label>
           {linkErr && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">{linkErr}</div>}
-          <button onClick={submitLink} disabled={!linkTarget || !linkWhy.trim()} className="btn btn-primary w-full !py-3">Link the cases</button>
+          <button onClick={submitLink} disabled={busy || !linkTarget || !linkWhy.trim()} className="btn btn-primary w-full !py-3">{busy ? 'Saving…' : 'Link the cases'}</button>
         </div>
       </Drawer>
     </div>

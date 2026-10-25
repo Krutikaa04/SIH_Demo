@@ -605,6 +605,18 @@ def simulate_complaint(conn, scenario=None):
 GUARDED_ACTIONS = ("transfer", "escalate", "dispose")
 
 
+def would_orphan_merged_lead(conn, c):
+    if not c.get("room_id") or c["status"] == "Disposed":
+        return False
+    room = db.one(conn, "SELECT lead_bureau,status FROM coordination_rooms WHERE id=?", (c["room_id"],))
+    if not room or room["status"] != "MERGED" or c["bureau_code"] != room["lead_bureau"]:
+        return False
+    other_open = db.rows(conn, "SELECT c.bureau_code FROM room_cases rc JOIN cases c ON c.case_id=rc.case_id "
+                              "WHERE rc.room_id=? AND c.case_id!=? AND c.status!='Disposed'",
+                        (c["room_id"], c["case_id"]))
+    return bool(other_open) and all(member["bureau_code"] != room["lead_bureau"] for member in other_open)
+
+
 def coordination_guard(conn, c):
     """Does an open overlap / a Coordination Room decision constrain what a Bureau may do with this case?
 
