@@ -444,8 +444,8 @@ def galaxy_graph(bureau: str = Query(default=None), conn=Depends(db.get_conn)):
 
 
 @app.get("/api/briefings/executive")
-def executive_briefing(conn=Depends(db.get_conn)):
-    return briefings.generate_executive_briefing(conn)
+def executive_briefing(conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    return briefings.generate_executive_briefing(conn, ctx)
 
 
 
