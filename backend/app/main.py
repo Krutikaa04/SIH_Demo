@@ -11,16 +11,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import coordination_policy, db, events, extras, intel, links, reports, risk, roles, seed, services, sla, galaxy, briefings, notify
+from . import auth, auth_routes, coordination_policy, db, events, extras, intel, links, reports, risk, roles, seed, services, sla, galaxy, briefings, notify
 from .constants import (BUREAUS, BUREAU_ORDER, CATEGORIES, OPEN_STATUSES, REGION_STATES, SLA_DAYS, STATUSES)
 from .roles import get_ctx
 
 DIST = db.ROOT / "frontend" / "dist"
 
 
+def _bootstrap_auth():
+    conn = db.connect()
+    try:
+        auth.bootstrap(conn)
+    finally:
+        conn.close()
+
+
 @asynccontextmanager
 async def lifespan(app):
     events.bind_loop(asyncio.get_running_loop())
+    await asyncio.to_thread(_bootstrap_auth)  # make sure someone can sign in (demo accounts, or a one-time admin)
 
     def _tick():
         conn = db.connect()
@@ -43,9 +52,42 @@ async def lifespan(app):
     task.cancel()
 
 
-app = FastAPI(title="AICTE Integrated Complaint Monitoring", lifespan=lifespan)
+def _demo_only():
+    """Presenter endpoints exist only while demo mode is on (AICTE_DEMO_MODE)."""
+    if not auth.demo_mode():
+        raise HTTPException(404, "Not available")
+
+
+class SecurityHeaders:
+    """Pure ASGI middleware (safe for the SSE stream): no-sniff, no framing, no caching of API responses."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        is_api = scope["path"].startswith("/api/")
+
+        async def wrapped(message):
+            if message["type"] == "http.response.start":
+                headers = message.setdefault("headers", [])
+                have = {k.lower() for k, _ in headers}
+                add = [(b"x-content-type-options", b"nosniff"), (b"x-frame-options", b"DENY"), (b"referrer-policy", b"same-origin")]
+                if is_api and b"cache-control" not in have:
+                    add.append((b"cache-control", b"no-store"))
+                headers.extend(h for h in add if h[0] not in have)
+            await send(message)
+
+        await self.app(scope, receive, wrapped)
+
+
+# Every /api route requires a signed-in session (see auth.require_auth); only the sign-in calls are public.
+app = FastAPI(title="AICTE Integrated Complaint Monitoring", lifespan=lifespan, dependencies=[Depends(auth.require_auth)])
+app.add_middleware(SecurityHeaders)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
                    allow_methods=["*"], allow_headers=["*"])
+app.include_router(auth_routes.router)
 app.include_router(extras.router)  # registered first so /api/cases/{id}/documents wins over the catch-all id route
 
 
@@ -447,8 +489,8 @@ def galaxy_graph(bureau: str = Query(default=None), conn=Depends(db.get_conn)):
 
 
 @app.get("/api/briefings/executive")
-def executive_briefing(conn=Depends(db.get_conn)):
-    return briefings.generate_executive_briefing(conn)
+def executive_briefing(conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    return briefings.generate_executive_briefing(conn, ctx)
 
 
 
@@ -713,7 +755,7 @@ def list_outbox(limit: int = 50, channel: str = "", conn=Depends(db.get_conn), c
 
 # ------------------------------------------------------------------ demo / admin ---
 
-@app.post("/api/simulate/complaint")
+@app.post("/api/simulate/complaint", dependencies=[Depends(_demo_only)])
 def simulate(body: dict = Body(default={}), conn=Depends(db.get_conn)):
     return services.simulate_complaint(conn, body.get("scenario"))
 
@@ -723,7 +765,7 @@ def verify(case_id: str = "", conn=Depends(db.get_conn)):
     return db.verify_chain(conn, case_id or None)
 
 
-@app.post("/api/admin/reset")
+@app.post("/api/admin/reset", dependencies=[Depends(_demo_only)])
 def reset():
     db.READY.wait(30)
     db.READY.clear()  # hold back all other requests until the rebuild is complete
@@ -739,7 +781,7 @@ def reset():
     return {"ok": True}
 
 
-@app.post("/api/admin/clock")
+@app.post("/api/admin/clock", dependencies=[Depends(_demo_only)])
 def clock(body: dict = Body(...), conn=Depends(db.get_conn)):
     """Time machine: advance the demo clock, then let the SLA engine react immediately."""
     off = int(db.get_setting(conn, "clock_offset_days", "0")) + int(body.get("add_days", 0))
@@ -751,7 +793,7 @@ def clock(body: dict = Body(...), conn=Depends(db.get_conn)):
     return {"offset_days": off, "now": db.iso(db.now(conn)), "sla": summary}
 
 
-@app.post("/api/admin/tamper")
+@app.post("/api/admin/tamper", dependencies=[Depends(_demo_only)])
 def tamper(body: dict = Body(default={}), conn=Depends(db.get_conn)):
     """Demo only: alter a history record behind the application's back (raw UPDATE, no re-hash)."""
     case_id, seq = body.get("case_id"), int(body.get("seq") or 2)
@@ -777,7 +819,7 @@ def tamper(body: dict = Body(default={}), conn=Depends(db.get_conn)):
     return {"case_id": case_id, "seq": seq}
 
 
-@app.post("/api/admin/restore-tamper")
+@app.post("/api/admin/restore-tamper", dependencies=[Depends(_demo_only)])
 def restore_tamper(conn=Depends(db.get_conn)):
     """Restores the tampered record to its original pristine state and re-verifies the chain."""
     ids = [x for x in (db.get_setting(conn, "tampered_row_ids", "") or "").split(",") if x]

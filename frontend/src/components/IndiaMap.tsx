@@ -5,9 +5,9 @@ import { cx } from '../ui'
 
 type Region = { region: string; total: number; pending: number; overdue: number; avg_risk: number }
 const METRICS: Record<string, { label: string; get: (r: Region) => number; from: string; to: string }> = {
-  pending: { label: 'Open cases', get: (r) => r.pending, from: '#e6ebf6', to: '#212f55' },
-  overdue: { label: 'Past due date', get: (r) => r.overdue, from: '#f9e3da', to: '#6f2415' },
-  risk: { label: 'Average risk', get: (r) => r.avg_risk, from: '#f8edc8', to: '#962f19' },
+  pending: { label: 'Open cases', get: (r) => r.pending, from: '#dfe8ff', to: '#1d37bd' },
+  overdue: { label: 'Past due date', get: (r) => r.overdue, from: '#ffe3e6', to: '#b51f38' },
+  risk: { label: 'Average risk', get: (r) => r.avg_risk, from: '#ffeccf', to: '#e05f00' },
 }
 const W = 420, H = 470
 
@@ -31,14 +31,14 @@ export default function IndiaMap({ regions, onSelect }: { regions: Region[]; onS
   const max = Math.max(...vals, 1), min = Math.min(...vals, 0)
   const color = (region: string) => {
     const r = byRegion[region]
-    if (!r) return '#e5dfd0'
+    if (!r) return 'var(--color-slate-200)'
     return mix(m.from, m.to, max === min ? 0.6 : 0.12 + 0.88 * (m.get(r) - min) / (max - min))
   }
   const h = hover ? byRegion[hover] : null
 
   return (
     <div>
-      <div className="mb-2 flex rounded-lg border border-line bg-slate-100 p-0.5 text-xs">
+      <div className="mb-2 flex rounded-lg border border-line bg-slate-100 p-1 text-xs">
         {Object.entries(METRICS).map(([k, v]) => (
           <button key={k} onClick={() => setMetric(k as any)}
             className={cx('flex-1 rounded-md px-2 py-1 font-medium transition', metric === k ? 'bg-sheet text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700')}>{v.label}</button>))}
@@ -46,7 +46,7 @@ export default function IndiaMap({ regions, onSelect }: { regions: Region[]; onS
       <div className="relative">
         <svg viewBox={`0 0 ${W} ${H}`} className="mx-auto w-full max-w-[420px]" onMouseLeave={() => setHover(null)}>
           {paths.map((p: any, i: number) => (
-            <path key={i} d={p.d} fill={color(p.region)} stroke="#fdfbf6" strokeWidth={hover === p.region ? 1.6 : 0.7}
+            <path key={i} d={p.d} fill={color(p.region)} stroke="var(--color-sheet)" strokeWidth={hover === p.region ? 1.6 : 0.7}
               opacity={hover && hover !== p.region ? 0.55 : 1} className="cursor-pointer transition-opacity"
               onMouseEnter={() => setHover(p.region)} onClick={() => byRegion[p.region] && onSelect(p.region)}>
               <title>{p.state} — {p.region} region</title>
@@ -57,8 +57,8 @@ export default function IndiaMap({ regions, onSelect }: { regions: Region[]; onS
             <div className="mb-1 text-sm font-semibold">{h.region}</div>
             <div className="num space-y-0.5 text-slate-200">
               <div>Open: <b className="text-white">{h.pending}</b> of {h.total}</div>
-              <div>Past due date: <b className="text-red-300">{h.overdue}</b></div>
-              <div>Average risk: <b className="text-amber-300">{h.avg_risk}</b></div>
+              <div>Past due date: <b className="text-[#ff9aa4]">{h.overdue}</b></div>
+              <div>Average risk: <b className="text-[#ffd36b]">{h.avg_risk}</b></div>
             </div>
             <div className="mt-1 text-[10px] text-slate-400">Select to open these cases</div>
           </div>)}

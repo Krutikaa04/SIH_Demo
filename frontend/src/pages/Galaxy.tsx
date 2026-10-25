@@ -21,7 +21,7 @@ import { Card, Loading, ErrorBox, cx } from '../ui'
 function InstitutionNode({ data }: { data: any }) {
   return (
     <div className={cx(
-      'rounded-xl border-2 bg-white px-3.5 py-2.5 shadow-md transition-all hover:shadow-lg',
+      'rounded-xl border-2 bg-sheet px-3.5 py-2.5 shadow-md transition-all hover:shadow-lg',
       data.hasCluster ? 'border-amber-400 ring-2 ring-amber-400/20' : 'border-slate-300'
     )} style={{ minWidth: 170 }}>
       <Handle type="target" position={Position.Top} className="opacity-0" />
@@ -44,7 +44,7 @@ function CaseNode({ data }: { data: any }) {
   const isBreached = data.isOverdue
   return (
     <div className={cx(
-      'rounded-lg border bg-white px-2.5 py-1.5 shadow-sm transition hover:scale-105',
+      'rounded-lg border bg-sheet px-2.5 py-1.5 shadow-sm transition hover:scale-105',
       isBreached ? 'border-red-400 ring-1 ring-red-400/30' : 'border-slate-200'
     )} style={{ minWidth: 120 }}>
       <Handle type="target" position={Position.Top} className="opacity-0" />
@@ -181,7 +181,7 @@ export default function Galaxy() {
             maxZoom={2.5}
             defaultEdgeOptions={{ animated: true }}>
             <Background color="#334155" gap={24} size={1} />
-            <Controls className="!bg-white !border-slate-200 !shadow-lg" />
+            <Controls className="!bg-sheet !border-slate-200 !shadow-lg" />
             <MiniMap
               className="!bg-slate-900 !border-slate-800"
               nodeColor={(n) => {

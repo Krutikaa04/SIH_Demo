@@ -8,7 +8,7 @@ import random
 import shutil
 from datetime import datetime, time, timedelta
 
-from . import db, intel
+from . import auth, db, intel
 from . import sla as sla_engine
 from .constants import (BUREAU_CATEGORIES, BUREAU_ORDER, BUREAUS, CATEGORY_GROUP, REGION_STATES, SLA_DAYS)
 
@@ -250,6 +250,7 @@ def build_institutions(rng):
 def seed(conn):
     shutil.rmtree(db.ROOT / "data" / "uploads", ignore_errors=True)
     db.reset_schema(conn)
+    auth.ensure_demo_users(conn)  # sign-in tables survive a reset; this only fills in any missing demo accounts
     rng = random.Random(42)
     now_dt = datetime.now().replace(microsecond=0)
     today = now_dt.date()
@@ -385,6 +386,14 @@ def seed(conn):
     pp = [s for s in specs if s["plan"] in ("breached", "nearing")][:4]
     for s in pp:
         s["transfers"] = 3
+
+    entity_examples = {(("Kochi", 0), "RB", 19): TOPIC[("unapproved", "RB")][1],
+                       (("Kochi", 0), "LC", 7): TOPIC[("unapproved", "LC")][1],
+                       (("Mysuru", 1), "PGRC", 7): DESC["Fee Overcharging / Refund"][0],
+                       (("Mysuru", 1), "RB", 5): DESC["Infrastructure Deficiency"][1]}
+    for s in specs:
+        if entity_examples.get((s["inst"]["key"], s["bureau"], s["days"])) == s["text"]:
+            s["text"] = s["text"].rstrip(".") + " (₹45,000)."
 
     # ---- insert cases in chronological order so case numbers increase with time ----
     mismatches = 0

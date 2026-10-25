@@ -77,7 +77,7 @@ export default function SearchBox({ className, onDone, autoFocus }: { className?
         <input ref={input} value={q} autoFocus={autoFocus} onChange={(e) => { setQ(e.target.value); setOpen(true); setIdx(-1) }}
           onFocus={() => setOpen(true)} onKeyDown={onKey} role="combobox" aria-expanded={open} aria-controls="search-results" autoComplete="off"
           placeholder="Find a case or institution, or ask a question…"
-          className="w-full rounded-full border border-line bg-sheet py-2.5 pl-10 pr-12 text-sm shadow-sm outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-navy-2 focus:bg-white focus:shadow-md focus:ring-4 focus:ring-navy-2/10" />
+          className="w-full rounded-full border border-line bg-sheet py-2.5 pl-10 pr-12 text-sm shadow-sm outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-navy-2 focus:bg-sheet focus:shadow-md focus:ring-4 focus:ring-navy-2/10" />
         <kbd className="pointer-events-none absolute right-3.5 top-1/2 hidden -translate-y-1/2 rounded border border-line bg-slate-50 px-1.5 font-mono text-[11px] text-slate-400 md:block">/</kbd>
       </label>
 
