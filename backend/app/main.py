@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import auth, auth_routes, db, events, extras, intel, links, reports, risk, roles, seed, services, sla, galaxy, briefings, notify
+from . import auth, auth_routes, coordination_policy, db, events, extras, intel, links, reports, risk, roles, seed, services, sla, galaxy, briefings, notify
 from .constants import (BUREAUS, BUREAU_ORDER, CATEGORIES, OPEN_STATUSES, REGION_STATES, SLA_DAYS, STATUSES)
 from .roles import get_ctx
 
@@ -182,6 +182,7 @@ ACTION_LABEL = {"remark": "REMARK", "assign": "ASSIGNED", "transfer": "TRANSFER"
 
 
 @app.post("/api/cases/{case_id:path}/actions")
+@coordination_policy.serialized
 def case_action(case_id: str, body: dict = Body(...), conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
     c = db.one(conn, services.CASE_SELECT + " WHERE c.case_id=?", (case_id,))
     if not c:
@@ -197,6 +198,8 @@ def case_action(case_id: str, body: dict = Body(...), conn=Depends(db.get_conn),
     # Coordination guard: overlapping / merged cases cannot be acted on blindly
     guard = services.coordination_guard(conn, c)
     ack_note = ""
+    if kind == "transfer" and services.would_orphan_merged_lead(conn, c):
+        raise HTTPException(409, "The last open lead case cannot leave its Bureau while merged followers remain open")
     if guard and kind in guard["applies_to"]:
         if guard["level"] == "block" and ctx.role != "SENIOR":
             raise HTTPException(403, guard["message"])
@@ -500,6 +503,8 @@ def _room_view(conn, rid, ctx=None):
     ids = [x[0] for x in conn.execute("SELECT case_id FROM room_cases WHERE room_id=?", (rid,))]
     cases = services.case_summaries(conn, ids)
     inst = db.one(conn, "SELECT aicte_id,name,city,region FROM institutions WHERE aicte_id=?", (r["institution_id"],))
+    if ctx is not None and ctx.role == "REGIONAL" and (not ctx.region or inst["region"] != ctx.region):
+        roles.forbid("This Coordination Room belongs to another region")
     comments = db.rows(conn, "SELECT author,role,body,ts FROM room_comments WHERE room_id=? ORDER BY id", (rid,))
     timeline = []
     for cid in ids:
@@ -517,6 +522,7 @@ def _room_view(conn, rid, ctx=None):
 
 
 @app.post("/api/rooms")
+@coordination_policy.serialized
 def create_room(body: dict = Body(...), conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
     if ctx.role == "REGIONAL":
         roles.forbid("Regional Offices cannot open Coordination Rooms")
@@ -600,13 +606,16 @@ def add_comment(room_id: str, body: dict = Body(...), conn=Depends(db.get_conn),
 
 
 @app.post("/api/rooms/{room_id}/lead")
+@coordination_policy.serialized
 def set_lead(room_id: str, body: dict = Body(...), conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
-    lead = body.get("lead_bureau")
-    if lead not in BUREAUS:
-        raise HTTPException(400, "unknown bureau")
     rv = _room_view(conn, room_id)
     if ctx.role == "REGIONAL" or (ctx.is_bureau and ctx.role not in {c["bureau"] for c in rv["cases"]}):
         roles.forbid("Only a participating Bureau or Senior Management can set the lead")
+    if rv["decision"] or rv["status"] != "OPEN":
+        raise HTTPException(409, "The lead is fixed once the room has a decision")
+    lead = coordination_policy.validate_lead(body.get("lead_bureau"), rv["cases"])
+    if lead == rv["lead_bureau"]:
+        return rv
     conn.execute("UPDATE coordination_rooms SET lead_bureau=? WHERE id=?", (lead, room_id))
     conn.execute("INSERT INTO room_comments(room_id,author,role,body,ts) VALUES(?,?,?,?,?)",
                  (room_id, "System", "SYS", f"Lead Bureau set to {lead}.", db.iso(db.now(conn))))
@@ -616,16 +625,15 @@ def set_lead(room_id: str, body: dict = Body(...), conn=Depends(db.get_conn), ct
 
 
 @app.post("/api/rooms/{room_id}/decision")
+@coordination_policy.serialized
 def decide(room_id: str, body: dict = Body(...), conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
     room = _room_view(conn, room_id)
     if not (ctx.role == "SENIOR" or ctx.role == room["lead_bureau"]):
         roles.forbid("Only the lead Bureau or Senior Management can record the decision")
     P = ctx.persona
-    outcome = body.get("outcome")
-    if outcome not in ("MERGE", "RESOLVE", "KEEP_SEPARATE"):
-        raise HTTPException(400, "outcome must be MERGE, RESOLVE or KEEP_SEPARATE")
-    lead = body.get("lead_bureau") or room["lead_bureau"]
-    note = (body.get("note") or "").strip()
+    outcome, lead, note, repeated = coordination_policy.decision_request(room, body)
+    if repeated:
+        return _room_view(conn, room_id, ctx)
     now_dt = db.iso(db.now(conn))
     decision = {"outcome": outcome, "lead_bureau": lead, "note": note, "decided_by": P[1], "at": now_dt}
     status = "MERGED" if outcome == "MERGE" else "RESOLVED"
