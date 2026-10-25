@@ -15,6 +15,35 @@ GENESIS = "0" * 64
 READY = threading.Event()
 READY.set()
 
+UNMATCHED_DDL = """
+CREATE TABLE IF NOT EXISTS unmatched_complaints (
+  id TEXT PRIMARY KEY, payload TEXT, institution_name TEXT, aicte_id TEXT, bureau TEXT, suggestions TEXT,
+  created_by TEXT, created_by_role TEXT, created_at TEXT, status TEXT DEFAULT 'OPEN',
+  resolved_case_id TEXT, resolved_by TEXT, resolved_at TEXT, discard_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_unmatched_status ON unmatched_complaints(status, bureau);
+"""
+
+AUTH_DDL = """
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE COLLATE NOCASE, display_name TEXT NOT NULL,
+  role TEXT NOT NULL, region TEXT, officer_id TEXT, password_hash TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1, must_change_password INTEGER NOT NULL DEFAULT 0, is_demo INTEGER NOT NULL DEFAULT 0,
+  failed_attempts INTEGER NOT NULL DEFAULT 0, locked_until TEXT, last_login_at TEXT, password_changed_at TEXT,
+  created_at TEXT, created_by TEXT
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL, created_at TEXT, last_seen_at TEXT, expires_at TEXT,
+  ip TEXT, user_agent TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_sessions_user ON sessions(user_id);
+CREATE TABLE IF NOT EXISTS auth_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, username TEXT, event TEXT, detail TEXT, ip TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_auth_events_ts ON auth_events(ts);
+"""
+# NOTE: the auth tables are deliberately NOT listed in TABLES, so "Reset demo data" never signs anyone out.
+
 SCHEMA = """
 CREATE TABLE institutions (
   aicte_id TEXT PRIMARY KEY, name TEXT, city TEXT, state TEXT, region TEXT, address TEXT,
@@ -61,18 +90,45 @@ CREATE TABLE room_comments (
 );
 CREATE TABLE alerts (
   id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, severity TEXT, case_id TEXT,
-  institution_id TEXT, pair_id TEXT, cluster_id TEXT, message TEXT, created_at TEXT, is_read INTEGER DEFAULT 0, link TEXT
+  institution_id TEXT, pair_id TEXT, cluster_id TEXT, message TEXT, created_at TEXT, is_read INTEGER DEFAULT 0, link TEXT,
+  target_bureaus TEXT, read_roles TEXT
 );
 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE case_number_counters (
+  bureau TEXT NOT NULL,
+  year INTEGER NOT NULL,
+  value INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (bureau, year)
+);
 CREATE TABLE documents (
   id INTEGER PRIMARY KEY AUTOINCREMENT, case_id TEXT, seq INTEGER, filename TEXT, path TEXT, sha256 TEXT,
   size INTEGER, uploaded_by TEXT, uploaded_at TEXT
 );
 CREATE INDEX ix_docs_case ON documents(case_id);
-"""
+CREATE TABLE outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, alert_id INTEGER, channel TEXT,
+  recipient_role TEXT, recipient_bureau TEXT, subject TEXT, body TEXT,
+  status TEXT DEFAULT 'SIMULATED', created_by TEXT, created_at TEXT
+);
+CREATE INDEX ix_outbox_alert ON outbox(alert_id);
+""" + UNMATCHED_DDL
 
-TABLES = ["institutions", "officers", "cases", "action_history", "overlap_pairs",
-          "coordination_rooms", "room_cases", "room_comments", "alerts", "settings", "documents"]
+TABLES = [
+    "unmatched_complaints",
+    "institutions",
+    "officers",
+    "cases",
+    "action_history",
+    "overlap_pairs",
+    "coordination_rooms",
+    "room_cases",
+    "room_comments",
+    "alerts",
+    "settings",
+    "case_number_counters",
+    "documents",
+    "outbox",
+]
 
 
 def configure(path=None):
@@ -100,7 +156,41 @@ def connect():
         conn.execute("CREATE INDEX IF NOT EXISTS ix_action_history_ts ON action_history(ts)")
     except sqlite3.OperationalError:
         pass
+    for ddl in ("ALTER TABLE alerts ADD COLUMN target_bureaus TEXT", "ALTER TABLE alerts ADD COLUMN read_roles TEXT"):
+        try:  # databases created before role-targeted alerts (issue #12)
+            conn.execute(ddl)
+        except sqlite3.OperationalError:
+            pass
+    try:  # databases created before the unmatched-complaint review queue (issue #14)
+        conn.executescript(UNMATCHED_DDL)
+    except sqlite3.OperationalError:
+        pass
+    try:  # sign-in tables (users, sessions, auth events); kept across demo resets
+        conn.executescript(AUTH_DDL)
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS outbox (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, alert_id INTEGER, channel TEXT,
+          recipient_role TEXT, recipient_bureau TEXT, subject TEXT, body TEXT,
+          status TEXT DEFAULT 'SIMULATED', created_by TEXT, created_at TEXT
+        )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_outbox_alert ON outbox(alert_id)")
+    except sqlite3.OperationalError:
+        pass
     return conn
+
+
+def fmt_targets(bureaus):
+    """Store a set of Bureau codes as ',PGRC,RB,' so membership is a simple LIKE '%,RB,%'. Empty = visible to all."""
+    codes = sorted({b for b in (bureaus or []) if b})
+    return ("," + ",".join(codes) + ",") if codes else ""
+
+
+def parse_targets(value):
+    return [x for x in (value or "").split(",") if x]
 
 
 def get_conn():
@@ -152,10 +242,20 @@ def set_setting(conn, key, value):
                  "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, str(value)))
 
 
+
 def next_counter(conn, key):
-    n = int(get_setting(conn, key, "0")) + 1
-    set_setting(conn, key, n)
-    return n
+    row = conn.execute(
+        """
+        INSERT INTO settings(key, value)
+        VALUES (?, '1')
+        ON CONFLICT(key) DO UPDATE
+        SET value = CAST(settings.value AS INTEGER) + 1
+        RETURNING value
+        """,
+        (key,),
+    ).fetchone()
+    return int(row["value"])
+
 
 
 def now(conn):

@@ -33,35 +33,35 @@ Legend: ✅ built and tested · 🟡 built, simplified on purpose (LITE) · 🎭
 ### Required features
 | # | Feature | Status | Where it lives |
 |---|---|---|---|
-| R1 | Centralized institution profile | ✅ | `pages/Institution.tsx`, `GET /api/institutions/{id}` |
+| R1 | Centralized institution profile | ✅ | `pages/Institution.tsx`, `GET /api/institutions/{id}`, `GET /api/institutions/{id}/history.csv` |
 | R2 | Case tracking (all required fields) | ✅ | `pages/Cases.tsx`, `pages/CaseDetail.tsx`, `GET /api/cases` |
 | R2+ | **Register a complaint** (form with live institution match + overlap preview) and **bulk CSV import** | ✅ | `pages/Register.tsx`, `services.register_complaint()`, `POST /api/complaints*` |
 | R3 | Cross-Bureau overlap detection + linking | ✅ | `backend/app/intel.py`, `pages/Overlaps.tsx`, `pages/Room.tsx` |
 | R4 | Real-time dashboard | 🟡 SSE push + refresh, single process | `pages/Dashboard.tsx`, `events.py`, `GET /api/events` |
 | R5 | Workflow & action history (+ documents) | ✅ / 🟡 docs on local disk, no preview | `POST /api/cases/{id}/actions`, `extras.py` (documents) |
 | R6 | Search & filters (all 8 filters) | ✅ | `Cases.tsx`, `services.case_where()` |
-| R7 | Alerts & notifications | 🟡 in-app only; 🎭 email/SMS not sent | `sla.py`, `pages/Alerts.tsx`, bell in `Layout.tsx` |
+| R7 | Alerts & notifications + simulated outbox | ✅ in-app alerts **targeted to the Bureaus they concern**, "Send reminder" dispatch, auto-queue escalation/reminder alerts, Outbox page with pluggable Notifier | `sla.py`, `notify.py`, `pages/Alerts.tsx`, `pages/Outbox.tsx` |
 | R8 | Reports & analytics (7 reports) | 🟡 fixed set, no custom builder | `reports.py`, `pages/Reports.tsx` |
 
 ### Standout features (A–K) and extras
 | # | Feature | Status | Notes |
 |---|---|---|---|
 | A | Explainable overlap engine (score breakdown) | ✅ | 5 signals, "Why flagged" drawer |
-| B | Coordination Room | 🟡 | Link → lead Bureau → comments → decision (MERGE / RESOLVE / KEEP_SEPARATE). "Merge" is logical, not a physical record merge |
+| B | Coordination Room | 🟡 | Link → lead Bureau → comments → decision (MERGE / RESOLVE / KEEP_SEPARATE). Officials can also **link cases manually** and add/remove cases of a room. "Merge" is logical, not a physical record merge |
 | B+ | **Coordination guard** | ✅ | Acting on an overlapping case needs a logged acknowledgement; after a MERGE the non-lead Bureau is blocked from transfer/escalate/dispose (`services.coordination_guard`) |
 | C | Institution risk score | ✅ | `risk.py`; badge + breakdown on profile, list, dashboard |
 | D | Auto-escalation + SLA countdown | ✅ | `sla.py` engine (30 s tick), live `Countdown` component |
 | E | Natural-language search | 🟡 | Rule-based parser `nlsearch.py`; shows "I understood" chips |
 | F | Hash-chained audit vault + verify | ✅ | `db.append_action` / `db.verify_chain`; `pages/AuditVault.tsx`, `GET /api/audit/ledger`, tamper demo endpoint |
 | G | Simulate New Complaint | ✅ | Real pipeline, 6 scripted scenarios |
-| H | Role switcher + permissions | 🟡 | Header-based roles, server-enforced matrix, **no login** |
+| H | Sign-in + role permissions | ✅ / 🟡 | Real password sign-in with server-side sessions, lock-out and account administration; server-enforced matrix. No SSO/MFA |
 | I | India region heatmap | 🟡 | Region-level choropleth, bundled GeoJSON, 3 metrics |
 | J | CSV/PDF export | ✅ CSV / 🟡 PDF (table only, no charts) | `Reports.tsx`, `pdf.ts`, `/api/export/cases` |
 | K1 | Time machine (+7 days) | ✅ | Demo menu; shifts the SLA clock and runs the engine |
 | K2 | "Duplicate effort saved" counter | 🟡 | Estimate with visible assumptions |
 | K3 | Daily briefing + ping-pong detector | 🟡 | Template text from live numbers; ping-pong = ≥3 transfers |
 | K4 | Case-network graph (stretch) | ❌ | Not started |
-| — | Real data ingestion / SSO | 🎭 | Seed data and role switcher stand in |
+| — | Real data ingestion / SSO | 🎭 | Seed data and local accounts stand in |
 
 ---
 
@@ -92,10 +92,10 @@ Legend: ✅ built and tested · 🟡 built, simplified on purpose (LITE) · 🎭
  ┌──────────────────────────────────────────────┐   REST /api/*  ┌────────────────────────────────────────┐
  │ pages: Dashboard · Cases · CaseDetail ·      │ ─────────────► │ FastAPI  (backend/app/main.py, extras) │
  │ Overlaps · Room · Institutions · Reports ·   │ ◄── SSE ────── │   routers, role context (roles.py)     │
- │ Alerts   + toasts, role switcher, Demo menu  │  /api/events   │ services.py  serialisers, read models  │
+ │ Alerts   + toasts, sign-in, Demo mode  │  /api/events   │ services.py  serialisers, read models  │
  └──────────────────────────────────────────────┘                │ intel.py     entity resolution + overlap│
                                                                  │ sla.py       SLA engine (30 s asyncio)  │
- X-Role / X-Region headers on every request                      │ risk.py · reports.py · nlsearch.py      │
+ session cookie on every request                               │ risk.py · reports.py · nlsearch.py      │
                                                                  │ db.py        SQLite + hash chain        │
                                                                  └───────────────┬────────────────────────┘
                                                                                  │ data/demo.db (+ data/uploads/)
@@ -114,6 +114,7 @@ backend/app/
   db.py                        schema, connection, settings, demo clock, append_action + verify_chain, READY reset lock
   seed.py                      synthetic data generator + planted scenarios + simulate_spec()
   intel.py                     name normalisation, Registry.resolve(), TextModel (TF-IDF), score_pair(), detect(), recluster()
+  links.py                     manual case links + Coordination Room membership (add / remove case)
   services.py                  case_where() filter builder, SLA info, serialisers, clusters_view(), simulate_complaint()
   sla.py                       tick() engine, reminder_digest(), init_state()
   risk.py                      institution risk score
@@ -126,7 +127,7 @@ backend/app/
 backend/tests/test_prototype.py  17 regression tests (throw-away DB)
 frontend/src/
   main.tsx                     routes · api.ts fetch wrapper, role store, SSE bus, useApi hook, download()
-  Layout.tsx                   sidebar, header (search, role switcher, Simulate, bell, Demo menu)
+  Layout.tsx                   sidebar, header (search, bell, account menu with sign-out and demo-account switch), Demo mode dock
   toast.tsx                    toast system + overlap / SLA toasts   ·  ui.tsx shared components
   pdf.ts                       jsPDF report export
   components/IndiaMap.tsx      d3-geo heatmap   ·  assets/india-regions.json (simplified GeoJSON, region-tagged)
@@ -186,7 +187,7 @@ Background cases are generated with an **exact collision check** using the real 
 2. Else normalise the name (lowercase, strip punctuation, expand `ABBR` govt→government, engg→engineering, coll→college, inst→institute, tech→technology…, map `CITY_ALIAS` bangalore→bengaluru, bombay→mumbai, madras→chennai…, drop stopwords).
 3. If a known city appears in the name → compare only against that city's institutions (**city blocking**); else compare against names without the city and require a clear winner (gap ≥5).
 4. `rapidfuzz.token_sort_ratio`; ≥88 → `NAME`, 80–88 → `NAME_LOW`, else unresolved. Ties/ambiguity (within 2 points) → unresolved.
-5. Unresolved complaints are **not** handled by a review queue yet (see backlog).
+5. Complaints that cannot be matched can be **parked in the review queue** (`unmatched.py`, §7.6b) and registered later.
 
 ### 7.2 Overlap scoring (`intel.score_pair`) — total 100
 | Signal | Max | Rule |
@@ -196,8 +197,12 @@ Background cases are generated with an **exact collision check** using the real 
 | Text similarity | 25 | TF-IDF cosine (1–2-grams, sublinear tf, domain synonym map e.g. teacher/staff→faculty, fees/refund→fee): `25 × min(1, cosine / 0.10)` |
 | Category | 15 | same category 15 · same category group 9 · shared inferred topic 6 · else 0 |
 | Time window | 15 | ≤30 days apart = 15, linearly to 0 at 180 days |
+| Shared references and amounts | 10 bonus | shared normalized rupee amount +4; exact circular/reference +6; exact roll/registration number +6; combined bonus capped at 10 and available headroom below 100 |
 
 - **Topic gate:** discard if `text_pts + category_pts < 10`.
+- **Entity evidence:** the sixth `entities` signal is always present (zero points without a shared value), with the actual matched amounts/references in its detail. It cannot bypass the institution or topic checks. The original five weights stay unchanged; the rounded score remains capped at 100. Register previews and overlap explanations show the evidence.
+- **Evaluation and limits:** [Entity evaluation](docs/ENTITY_EVALUATION.md) records the scoring decision, reproducible planted-positive/decoy precision and recall, extraction bounds and synthetic-data limitations. Shared amounts/references support review; they do not prove a shared incident or represent a probability.
+- **Existing data:** new complaints and previews use the signal immediately. Stored pair scores are retained; re-seed the synthetic demo (`python run.py --reseed`) to see the Kochi 69→73 promotion and same-amount unrelated-topic decoy.
 - **Bands:** ≥70 **HIGH** ("Potential Overlapping Cases - Coordination Required") · 50–69 **MEDIUM** ("Possible Overlap - Review Recommended") · <50 discarded.
 - **Type:** different current Bureaus → `CROSS_BUREAU`; same Bureau → `DUPLICATE`.
 - **Candidates** (`detect`): same `institution_id`, other case is open **or disposed within 90 days**.
@@ -215,16 +220,35 @@ Background cases are generated with an **exact collision check** using the real 
   - ≥3 transfers → `PING_PONG` alert · reminder digest per Bureau per day (no action ≥10 days).
 - **Demo clock:** `settings.clock_offset_days` is added to "now" everywhere (`db.now`). `POST /api/admin/clock {add_days:7}` moves it. Only **Reset** brings it back.
 
-### 7.5 Roles and permissions (`roles.py`)
-No login. The UI sends `X-Role` (`RB|PGRC|AB|LC|VIG|REGIONAL|SENIOR`) and `X-Region` (for `REGIONAL`); the **server enforces** the matrix:
+### 7.5 Sign-in, roles and permissions (`auth.py`, `auth_routes.py`, `roles.py`)
+**Real sign-in.** Every `/api` route needs a valid session (a global FastAPI dependency, `auth.require_auth`); only `/api/auth/login|logout|me|config` are public. Who you are comes **only** from the session: the old `X-Role` / `X-Region` headers are ignored.
+- **Passwords:** salted PBKDF2-SHA256 (200,000 rounds, standard library, offline). Policy: 8+ characters with letters and numbers, not a common password.
+- **Sessions:** a random 256-bit token in an **HttpOnly, SameSite=Lax** cookie (`icmd_session`; `Secure` on HTTPS or `AICTE_COOKIE_SECURE=1`). The database stores only the token's SHA-256. Idle timeout 8 h (`AICTE_SESSION_IDLE_HOURS`), absolute 12 h (`AICTE_SESSION_MAX_HOURS`), max 5 per user. Sign-out, disabling the user, changing role or changing password end sessions on the server. Timestamps use real wall-clock time, so the demo time machine cannot expire sessions.
+- **Abuse limits:** 5 wrong passwords lock the account for 15 minutes; 30 attempts per 5 minutes per address; unknown users cost the same time as real ones and get the same message. Cross-site writes are refused (`Origin` must match the host). API responses are `no-store`; pages send `nosniff` and `X-Frame-Options: DENY`.
+- **Accounts:** table `users` (role, region for Regional, `must_change_password`, `is_demo`, lock state). Senior Management manages them on **People and access** (`/users`): add a person (a one-time temporary password is shown), reset a password, enable/disable. You cannot disable yourself or the last active Senior. New and reset accounts must choose their own password at first sign-in (every other API call returns `403 PASSWORD_CHANGE_REQUIRED` until they do).
+- **Audit:** `auth_events` records sign-ins, failures, lock-outs, password and account changes (shown to Senior). Case history still records the signed-in person as the actor.
+- **Survives demo resets:** `users`, `sessions` and `auth_events` are not in `db.TABLES`, so *Reset demo data* never signs anyone out.
+- **Demo mode** (`AICTE_DEMO_MODE`, default **on** for the prototype): seeds one account per role (`rb`, `pgrc`, `ab`, `lc`, `vig`, `senior`, `regional-<region>`) with the published password `Demo@2026` (`AICTE_DEMO_PASSWORD`), lists them on the sign-in page, and enables the presenter endpoints (`/api/simulate/complaint`, `/api/admin/*`). **Set `AICTE_DEMO_MODE=0` for anything real:** the accounts are not created, the page lists nothing, the presenter endpoints return 404, and the first start creates a Senior `admin` with a one-time password printed in the console (or `AICTE_BOOTSTRAP_PASSWORD`).
+- **Not built (production):** SSO / e-Office, MFA, password-reset by email, per-district scoping, rate limiting behind a proxy (the address seen is the proxy's).
+
+What each signed-in role may do (unchanged matrix):
 | Role | Reads | Case actions |
 |---|---|---|
 | RB / PGRC / AB / LC / VIG | everything (single window) | remark, assign, transfer, escalate, dispose — **only on cases currently assigned to their Bureau** |
 | REGIONAL | own region only (cases, institutions, alerts, dashboard) | remark only, only in own region |
 | SENIOR | everything | remark, escalate (not transfer/dispose) |
-- Coordination Room: any non-regional role can open a room (anyone can comment); **only the lead Bureau or Senior can record the decision**; only participating Bureaus/Senior can set the lead.
+- Coordination Room: any non-regional role can open a room (anyone can comment); **only the lead Bureau or Senior can record the decision**; only participating Bureaus/Senior can set the lead. **Manual links and room membership** ([§7.6d](#76d-manual-links-and-room-membership-linkspy)): Regional never; a Bureau only where it owns one of the cases (or participates in the room); Senior always; a room that already has a decision can be changed by Senior only.
 - Bureau roles get a **"My desk"** panel on the dashboard; Senior/Regional get the **Daily briefing**.
-- Default role when no header is sent: `SENIOR`. Role is remembered in `localStorage` (`icmd.role`).
+- Switching roles in the demo means signing in as another account (account menu → *Switch demo account*).
+
+### 7.5b Alert visibility (role-targeted alerts)
+Every alert row has `target_bureaus` (stored as `,PGRC,RB,` so membership is `LIKE '%,RB,%'`) and `read_roles` (per-role read state). Producers set the targets: an **overlap** alert targets the Bureaus of *both* cases in the pair; **SLA_NEAR / ESCALATION / PING_PONG** target the case's Bureau (a transfer ping-pong targets the from- and to-Bureau); a **PENDING_REMINDER** digest targets its Bureau; **aggregate digests** (many cases in one tick) target the union of the Bureaus listed. Visibility matrix (`services.alert_filter`):
+| Role | Sees |
+|---|---|
+| SENIOR | every alert |
+| RB / PGRC / AB / LC / VIG | alerts whose `target_bureaus` contains the role, plus untargeted ("global"/legacy) alerts |
+| REGIONAL | alerts about institutions in its region (any Bureau) |
+Read state is **per role**: one Bureau reading a shared alert does not clear it for another, and `POST /api/alerts/read-all` only touches the alerts the caller can see (legacy `is_read=1` still means "read by everyone"). `GET /api/alerts` returns `unread` = all *visible* unread alerts (not limited by `type`/`limit`). The reminder `notify` and `notify/preview` endpoints also require the alert to be visible to the caller. SSE events are still broadcast to every client; `overlap.detected` carries `targets` + `region` and `sla.escalated` carries `bureaus` so `toast.tsx` shows the toast only to the roles concerned (the server remains the source of truth for the list). Existing databases gain the two columns automatically on first connect (NULL targets = visible to all).
 
 ### 7.6 Tamper-evident history (`db.py`)
 `action_history` rows form a **per-case hash chain**: `hash = sha256(prev_hash + canonical JSON of [case_id, seq, ts, actor_id, actor_bureau, action_type, from, to, remarks])`, genesis = 64 zeros. `append_action()` is the **only** writer (the seed uses it too). `verify_chain(case_id=None)` recomputes and reports the first broken record. `POST /api/admin/tamper` does a raw `UPDATE` to demonstrate detection. Uploaded documents' SHA-256 is embedded in the history remark. *Tamper-evident, not tamper-proof* (someone with DB admin rights could recompute the chain).
@@ -232,7 +256,7 @@ No login. The UI sends `X-Role` (`RB|PGRC|AB|LC|VIG|REGIONAL|SENIOR`) and `X-Reg
 ### 7.6b Registering complaints (`services.py`, `pages/Register.tsx`)
 Every new complaint — from the **Register form**, a **CSV import**, or the **Simulate** button — goes through one function, `services.register_complaint()`: validate (`clean_complaint`) → resolve the institution → duplicate check (same institution + Bureau + text while still open) → least-loaded desk officer → insert case → two history events → `intel.detect(only_case=…)` → overlap alerts → SSE push.
 - **Live check:** `POST /api/complaints/preview` (no writes) returns the resolved institution (+ method/confidence), up to 5 `suggestions` when the match is missing or low-confidence (ranking ignores generic words like "college/institute"), the institution's open cases, and the **potential overlaps with score breakdown** — so the official sees "Potential Overlapping Cases" *before* submitting.
-- **Unresolved names:** `register` returns `422 UNRESOLVED_INSTITUTION` with suggestions; the user picks the institution (method `MANUAL`) or searches the master list. There is still **no review queue** for unresolved rows (backlog).
+- **Unresolved names:** `register` returns `422 UNRESOLVED_INSTITUTION` with suggestions; the user picks the institution (method `MANUAL`) or searches the master list. Instead of picking on the spot the user can choose **Save for review** (`park_unmatched:true`): the cleaned complaint is stored in `unmatched_complaints` (`UNM-0001`…) and nobody loses it. The **Review queue** page (`/unmatched`, sidebar badge = waiting items) lists parked complaints with the closest institutions and a master-list search. **Register** re-validates the payload and runs the normal `register_complaint` pipeline (overlap scoring, alerts) with method `MANUAL`, adds an `INSTITUTION_MATCHED` history entry and links `resolved_case_id`; resolving twice returns the same case. **Discard** needs a reason and keeps the row (`DISCARDED`, who/when/why) as an audit record. Park: any non-Regional role (a Bureau only for itself); resolve/discard/see: the receiving Bureau and Senior. CSV import has a *Save unmatched rows to the review queue* option (real run only; dry runs never write).
 - **CSV import:** `POST /api/complaints/import {csv_text, dry_run}`; column aliases are accepted (`institution`, `complaint`, `date`…); max 500 rows; `dry_run:true` validates + previews every row (ready / needs review / error); the real run registers valid rows sequentially (so later rows can overlap with earlier ones) and sends one summary toast instead of one per row.
 - Bureau roles always register into **their own Bureau** (the bureau field is locked/ignored); Senior/Regional choose the Bureau.
 
@@ -244,6 +268,14 @@ Applies to `transfer`, `escalate`, `dispose` only (remark / assign / documents a
 | Room decision = **MERGE** and this case's Bureau is **not the lead** | `block` (`FOLLOWS_LEAD`) | `403`; buttons greyed out; banner "Actions restricted". **Senior is exempt from the block** but must acknowledge |
 | MERGE and this case is the **lead's**, dispose while followers are still open | `ack` (`LEAD_WITH_OPEN_FOLLOWERS`, dispose only) | acknowledgement required |
 `GET /api/cases/{id}` returns `guard` (level, code, message, `applies_to`, room/lead/other Bureaus) and removes blocked actions from `allowed_actions`. RESOLVE / KEEP_SEPARATE decisions lift the guard.
+
+### 7.6d Manual links and room membership (`links.py`)
+The engine can miss a connection (different wording, odd names), so officials can link cases themselves. A manual link is an `overlap_pairs` row with `type='MANUAL'`, `score=100`, `band='HIGH'`, `status='CONFIRMED'` and the rationale/actor stored in `review_*`; it joins a cluster exactly like a detected pair, so the Overlaps list ("Manual" badge), the Coordination Room and the coordination guard treat it like any other overlap. `recluster` and `detect` never drop it.
+- `POST /api/links {case_a, case_b, rationale}`: same institution only (v1), different cases, rationale required (422), idempotent (an existing active pair is returned with `created:false`; a REJECTED/DISMISSED pair is revived as manual). Each case gets a `LINKED_MANUAL` history entry. If one of the cases is already in a room, the other joins it; two different rooms conflict (409).
+- `POST /api/rooms/{id}/cases {case_id, rationale?}`: the case must belong to the room's institution and not sit in another room (409). If it is not yet connected to the room's cluster it is linked (manually) to the earliest case of another Bureau; the case gets `LINKED`.
+- `DELETE /api/rooms/{id}/cases/{case_id}?reason=`: the case's pairs with the other members are set to REJECTED (so `recluster` does not pull it back), `room_id`/`cluster_id` are cleared, history `UNLINKED`. Refused (409) when fewer than two cases would remain or when the case is the only bridge between the remaining ones. A room with a decision (MERGED/RESOLVED) can only be changed by Senior.
+- `GET /api/rooms/{id}` returns `can_manage_members` for the caller; `Room.tsx` shows **Add case** / remove buttons only when true, `CaseDetail.tsx` has **Link to another case…**.
+- Every write goes through `db.append_action`, so the hash chain stays valid (tests assert `verify_chain` after each operation).
 
 ### 7.7 Natural-language search (`nlsearch.parse`)
 Rule-based grammar → the same filter params the Cases page uses + a list of **chips** ("I understood…"). Understands: status (pending/open, disposed, under process, transferred, escalated, pending info), flags (overdue/beyond timeline, nearing, overlap), Bureau names/codes, region names (longest match first so "south-western" ≠ "western") and states, categories (keyword → canonical), ages ("older than 30 days/2 months", "last 2 weeks", "this month/year", "since March"), AICTE ID, case ID, institution (fuzzy), city, and leftover keywords. Unknown text falls back to keyword search.
@@ -263,9 +295,9 @@ Rule-based grammar → the same filter params the Cases page uses + a list of **
 | `officers` | id (`OFF-RB-01`…), name, bureau_code, designation, level 1–4 (1–2 desk, 3 Deputy Director, 4 Director) |
 | `cases` | `case_id` (PK `RB/2026/00054`; prefix = *originating* Bureau), reference_no, institution_id, submitted_institution_name, submitted_aicte_id, resolution_method (`ID`/`NAME`/`NAME_LOW`), resolution_conf, source, received_on, category, category_group, severity 1–5, description, status, origin_bureau, **bureau_code (current handler)**, assigned_officer_id, last_action(+_at), next_action, sla_days, due_date, escalation_level, transfer_count, disposed_on, outcome, room_id, cluster_id, warned_at/breached_at/severe_at/pingpong_at |
 | `action_history` | case_id, seq, ts, actor_id/name/bureau, action_type (RECEIVED, ASSIGNED, REMARK, TRANSFER, ESCALATE, AUTO_ESCALATE, DISPOSE, LINKED, COORDINATION, DOC_ADDED), from/to bureau, remarks, prev_hash, hash — unique (case_id, seq) |
-| `overlap_pairs` | id (`PR-0001`), case_a, case_b, institution_id, type, score, band, breakdown (JSON), explanation, headline, cluster_id, status (OPEN/LINKED/RESOLVED/DISMISSED), detected_at |
+| `overlap_pairs` | id (`PR-0001`), case_a, case_b, institution_id, type (`CROSS_BUREAU` / `DUPLICATE` / `MANUAL`), score, band, breakdown (JSON), explanation, headline, cluster_id, status (OPEN/LINKED/CONFIRMED/DEFERRED/REJECTED/RESOLVED/DISMISSED), detected_at, review_* |
 | `coordination_rooms` / `room_cases` / `room_comments` | room id (`ROOM-0001`), cluster_id, lead_bureau, status (OPEN/MERGED/RESOLVED), decision (JSON), comments |
-| `alerts` | type (OVERLAP, SLA_NEAR, SLA_BREACH, ESCALATION, PENDING_REMINDER, PING_PONG), severity, case_id, institution_id, pair_id, cluster_id, message, created_at, is_read, link |
+| `alerts` | type (OVERLAP, SLA_NEAR, SLA_BREACH, ESCALATION, PENDING_REMINDER, PING_PONG), severity, case_id, institution_id, pair_id, cluster_id, message, created_at, is_read, link, target_bureaus, read_roles |
 | `documents` | case_id, seq, filename, path, sha256, size, uploaded_by, uploaded_at (files under `data/uploads/<case>/`) |
 | `settings` | key/value: `clock_offset_days`, `cluster_seq`, `pair_seq`, `room_seq`, `sim_counter`, `reminder_day` |
 
@@ -273,7 +305,7 @@ Rule-based grammar → the same filter params the Cases page uses + a list of **
 
 ---
 
-## 9. API reference (base `/api`, JSON; headers `X-Role`, `X-Region`)
+## 9. API reference (base `/api`, JSON; every route except `/auth/*` needs the session cookie)
 
 > **Case IDs contain slashes** (`RB/2026/00054`). The routes use `{case_id:path}`; clients should URL-encode (`RB%2F2026%2F00054`). The `extras` router is registered **before** the main routes so `/api/cases/{id}/documents` isn't swallowed by the generic case route — keep that order.
 
@@ -287,13 +319,18 @@ Rule-based grammar → the same filter params the Cases page uses + a list of **
 | `GET/POST /cases/{id}/documents` · `GET /documents/{id}/download` | list / upload (base64 JSON, ≤2 MB) / download; `verified` = file hash still matches |
 | `GET /institutions?q&region` · `GET /institutions/{aicte_id}` | list with risk; profile with cases, clusters, stats, risk breakdown |
 | `GET /overlaps?status=active\|all` · `GET /overlaps/{pair_id}` | clusters with pairs + breakdowns · one pair |
-| `POST /rooms {cluster_id}` · `GET /rooms/{id}` · `POST /rooms/{id}/comments` · `/lead` · `/decision` | Coordination Room (decision outcomes `MERGE`, `RESOLVE`, `KEEP_SEPARATE`) |
-| `GET /alerts?unread&type&limit` · `POST /alerts/{id}/read` · `POST /alerts/read-all` | alerts (each has a `link`) |
+| `POST /rooms {cluster_id}` · `GET /rooms/{id}` · `POST /rooms/{id}/comments` · `/lead` · `/decision` | Coordination Room (decision outcomes `MERGE`, `RESOLVE`, `KEEP_SEPARATE`); `GET` includes `can_manage_members` |
+| `POST /links {case_a, case_b, rationale}` · `POST /rooms/{id}/cases {case_id}` · `DELETE /rooms/{id}/cases/{case_id}?reason=` | manual link of two cases (`type='MANUAL'` pair) · add / remove a case in a room (see §7.6d) |
+| `GET /alerts?unread&type&limit` · `POST /alerts/{id}/read` · `POST /alerts/read-all` | alerts **visible to the caller's role** (each has a `link` and `target_bureaus`; `read` is per role; read endpoints 404 for alerts the role cannot see) |
 | `GET /search/nl?q=` | natural-language parse → `{chips, params}` |
 | `GET /reports/{bureau\|region\|institution\|ageing\|disposal\|overlaps\|periodic}?format=json\|csv&period=month\|quarter` | reports |
 | `GET /export/cases?<same filters>` | CSV export of the filtered case list |
 | `GET /audit/verify?case_id=` | verify the hash chain (all cases if omitted) |
-| `POST /complaints/preview` · `POST /complaints` · `POST /complaints/import` | register-form live check (no writes) · register one complaint (`422 UNRESOLVED_INSTITUTION` + suggestions) · bulk CSV import (`dry_run`) |
+| `GET /auth/config` · `POST /auth/login {username,password}` · `GET /auth/me` · `POST /auth/logout` | public: sign-in page data (demo accounts only in demo mode) · sets the session cookie · current user · ends the session |
+| `POST /auth/change-password {current_password,new_password}` | any signed-in user (also the only call allowed while a temporary password is in use) |
+| `GET/POST /users` · `PATCH /users/{id}` · `POST /users/{id}/reset-password` · `GET /auth/events` | Senior Management only: list / add accounts · enable, disable, change role · new temporary password · sign-in activity |
+| `POST /complaints/preview` · `POST /complaints` · `POST /complaints/import` | register-form live check (no writes) · register one complaint (`422 UNRESOLVED_INSTITUTION` + suggestions, or `{status:"PARKED",queue_id}` with `park_unmatched:true`) · bulk CSV import (`dry_run`, `park_unmatched`) |
+| `GET /unmatched?status=OPEN\|RESOLVED\|DISCARDED\|ALL` · `POST /unmatched/{id}/resolve {institution_id}` · `DELETE /unmatched/{id}?reason=` | review queue (items + `counts`) · register a parked complaint under the chosen institution (idempotent) · discard with a reason |
 | `POST /simulate/complaint {scenario?:1..6}` | file a scripted complaint through the real pipeline (uses `register_complaint`) |
 | `POST /admin/clock {add_days}` · `/admin/tamper` · `/admin/reset` | demo tools |
 | `GET /events` | SSE stream |
@@ -303,11 +340,17 @@ Interactive docs: `http://127.0.0.1:8000/docs` (FastAPI Swagger) while the app r
 
 ## 10. Frontend guide
 
-- **Routes** (`main.tsx`): `/` Dashboard · `/cases` · `/cases/<case-id…>` (splat route because IDs have slashes) · `/overlaps` (`?open=OVL-xxxx` opens the Why-flagged drawer) · `/rooms/:id` · `/institutions` · `/institutions/:id` · `/reports` · `/alerts` · `/register` (Register complaint: single form + bulk CSV).
-- **Data fetching:** `useApi(path)` (in `api.ts`) fetches and **auto-refreshes on SSE events and on role change**. It sets `data=null` on error so 403/404 show an `ErrorBox`. Use `post()`/`api()` for writes; `download()` for files (it sends the role headers; a plain `<a href>` can't).
-- **Role:** `useRole()` / `setRole()` (persisted in `localStorage`). The header dropdown calls `setRole`; every `api()` call adds the headers. UI greys out actions using the `allowed_actions` the server returns — **the server is the source of truth**.
-- **Shared UI** (`ui.tsx`): `BureauBadge`, `StatusChip`, `SlaChip`, `RiskBadge`, `ScoreRing`, `Card`, `Drawer`, `Countdown` (live SLA timer using server clock), formatters.
-- **Conventions:** Tailwind utility classes; theme tokens in `index.css` (`navy`, `navy-2`, `saffron`); status/bureau colours live in `ui.tsx`. TypeScript is intentionally loose (`any` is common) — tighten if you add shared types.
+- **Design language: "Signal".** A control-room look for a national grievance desk: an always-midnight sidebar with the chakra as a watermark, cobalt for action, **saffron** for the one thing to do next, **vermilion only for what is late or in conflict**, and a full **dark theme** (toggle in the top bar, remembered in `localStorage` as `icmd.theme`; `theme.ts`). Type: **Bricolage Grotesque** (headlines and big figures, `font-display`), **Instrument Sans** (reading), **JetBrains Mono** (case numbers), all self-hosted through `@fontsource-variable/*`, so the app stays offline.
+- **Colour system:** `index.css` is **generated** (palettes are plain arrays; the dark map is derived by blending each hue into the dark surface), and it **replaces Tailwind's stock scales** (`slate`, `red`, `orange`, `amber`, `emerald`, `blue`, `indigo`, `sky`). Steps 50-200 are backgrounds and borders, 300+ are text and solids; the same variables are redefined under `[data-theme="dark"]`, so every existing utility flips with the theme. Rules that keep it working: use `bg-sheet` (not `bg-white`) for surfaces, `text-snow` for light text on always-dark panels, and **explicit hex** (e.g. `text-[#ff9aa4]`) for tinted text on `.mesh` or the sign-in page, because those panels stay dark in both themes (put `data-theme="dark"` on any such panel to scope the dark tokens to it). Badges use `tint()` / `inkOf()` from `ui.tsx` (CSS `color-mix`), which adapt to either theme.
+- **Building blocks:** `.mesh` (hero surface), `.glass`, `.topbar-glass`, `.btn .btn-primary|accent|ghost|danger` (gradient with a sheen on hover), `.field`, `.eyebrow`, `.case-id`, `.skeleton`, `.text-gradient`; React helpers `CountUp`, `Sparkline`, `Gauge`, `Chakra`, `Stat`, `PageHeader`, `Card`, `Segmented`, `EmptyState`, `Logo` (two overlapping circles with the overlap in saffron: the product idea). Motion respects `prefers-reduced-motion`.
+- **Layout** (`Layout.tsx`): five main nav items (Home, Cases, Add complaint, Coordination, Institutions) plus a collapsible **More** group (Complaints to match, All alerts, Reports, Connection map, Executive briefing, Sent messages); a bottom tab bar replaces the sidebar below 768 px. The top bar has one **search box** (`components/SearchBox.tsx`: case numbers, institutions, plain-English questions; press `/`), the alert bell and the **role chip** (the old role dropdown). **Demo mode** (a switch in the role menu, or Ctrl+Shift+D) shows `components/DemoDock.tsx` with the presenter controls (new complaint, time jump, audit verify/tamper/restore, reset); it is off by default.
+- **Home** (`pages/Dashboard.tsx`): a hero with the person's name and an on-track gauge; Bureau officers get a to-do list (overdue / coordinate / due soon) built from `/cases` filters, with the organisation-wide charts folded under "The wider picture"; Senior and Regional get "Today at a glance" with the briefing, four headline figures and the full `components/Analytics.tsx`.
+- **Routes** (`main.tsx`): `/` · `/cases` (for a Bureau officer plain `/cases` starts on their own Bureau) · `/cases/<case-id…>` (splat route because IDs have slashes) · `/overlaps` (`?open=OVL-xxxx` opens the Why-flagged drawer) · `/rooms/:id` · `/institutions` · `/institutions/:id` · `/reports` · `/alerts` · `/register` · `/unmatched` · `/galaxy` · `/briefings` · `/outbox`.
+- **Data fetching:** `useApi(path)` (in `api.ts`) fetches and **auto-refreshes on SSE events and on role change**. It sets `data=null` on error so 403/404 show an `ErrorBox`. Use `post()`/`api()` for writes; `download()` for files.
+- **Role:** `useRole()` / `setRole()` (persisted in `localStorage`). Every `api()` call adds the headers. The UI greys out actions using the `allowed_actions` the server returns — the server stays the authority.
+- **Shared UI** (`ui.tsx`): `PageHeader`, `Card`, `Stat`, `Segmented`, `EmptyState`, `Drawer`, `Logo`, `BureauBadge`, `StatusChip`, `SlaChip` / `dueText`, `RiskBadge`, `ScoreRing`, `Countdown` (live SLA timer using server clock), formatters.
+- **Wording rule:** plain words for officers ("Past due date", "Cases that overlap", "Complaints to match", "Add a note", "Send to another Bureau"). The problem statement's own phrase **"Potential Overlapping Cases — Coordination Required"** is kept word for word everywhere the alert appears. The API, tests and field names are unchanged.
+- **Conventions:** TypeScript is intentionally loose (`any` is common) — tighten if you add tests. Mobile: check any new page at 375 px.
 - **Gotcha:** after editing the frontend, run `npm run build`, then hard-refresh the browser (the server sends `Cache-Control: no-cache` for `index.html`, but an open tab keeps its old bundle).
 
 ---
@@ -336,21 +379,20 @@ Interactive docs: `http://127.0.0.1:8000/docs` (FastAPI Swagger) while the app r
 ---
 
 ## 13. Not built / known limitations
-- **No authentication** (roles are header-based and server-enforced, but anyone can change the header). Production: AICTE SSO / e-Office, RBAC+ABAC, MFA.
+- **Local accounts only.** Sign-in is real (hashed passwords, server-side sessions, lock-out, audit of sign-ins), but there is no AICTE SSO / e-Office, no MFA and no emailed password reset. Demo mode publishes one shared password; run with `AICTE_DEMO_MODE=0` outside demos.
 - **No email/SMS** — alerts are in-app only; "send reminder" isn't implemented at all (planned as a message preview/outbox mock).
 - **Data is synthetic**; officials can now register complaints and import CSVs, but there are still no live feeds from CPGRAMS/Bureau systems; the institution master is the seeded table.
 - **English only**; no Hindi/regional-language matching.
-- **No review queue** for complaints whose institution can't be resolved: the Register form asks the user to pick from suggestions, and CSV rows that don't match are reported as "needs review" and **skipped** (fix the CSV and re-upload). Nothing is parked for later.
+- **Review queue is manual**: parked complaints wait until an official resolves or discards them (no reminders/SLA on the queue yet, no retention policy for discarded rows). Unless "Save for review" / "park unmatched rows" is chosen, the old behaviour stays: the user picks from suggestions and unmatched CSV rows are skipped.
 - **Weights are hand-set** (calibrated on the test pairs), not learned from feedback; no officer "was this right?" loop.
 - **SLA values are illustrative**; single SLA per Bureau (no per-category/statutory SLAs, no working-day/holiday calendar).
-- **Coordination "merge" is logical** — cases are linked under a lead Bureau (and the guard restricts follower Bureaus), but nothing syncs to systems of record. A room can only be opened from a **detected** cluster: there is **no manual link/unlink** of arbitrary cases yet.
-- **Alerts are not role-targeted:** every role sees every alert (the Regional Office is filtered by region).
+- **Coordination "merge" is logical** — cases are linked under a lead Bureau (and the guard restricts follower Bureaus), but nothing syncs to systems of record. Manual links are same-institution only (an institution renamed in the master list cannot be bridged), and a room can only be opened from a cluster (detected or manual).
 - **PDF has no charts**; no custom report builder, saved filters, or scheduled reports.
 - **Documents:** local disk only, ≤2 MB, no inline preview, no e-signature.
 - **Heatmap is region-level** (no district drill-down). Region names (8) should be verified against AICTE's real regional-office structure.
 - **K4 case-network graph** not built.
 - **Scale:** SQLite, single process, in-memory TF-IDF refit per detection run — fine for hundreds of cases; production needs PostgreSQL, a worker queue, and incremental indexing.
-- **UI:** desktop-first; sidebar hidden on narrow screens; TypeScript loosely typed; no automated frontend tests.
+- **UI:** responsive (bottom tab bar on phones); TypeScript loosely typed; no automated frontend tests. The Connection map's node layout is crowded with many cases (backlog).
 
 ---
 
@@ -365,9 +407,6 @@ Suggested split mirrors the original four tracks. Effort is a rough developer-ho
 - Move to PostgreSQL + a real job runner for the SLA tick (4–6 h, production scope).
 
 **Track B — Intelligence**
-- **Review queue for unresolved/ambiguous institution matches** (park the complaint, let an officer confirm later; reuse `Registry.suggest`) (3 h).
-- **Manual link/unlink of cases** and add/remove case in a Coordination Room (2 h).
-- **Role-targeted alerts** (RB sees alerts about RB cases and overlaps it is part of) (1 h).
 - **Officer feedback on overlaps** ("was this right?" thumbs) storing labels; script to re-tune weights/thresholds (3–4 h).
 - Multilingual (Hindi) matching via on-prem embeddings, e.g. MuRIL/IndicBERT (research, 6+ h).
 - Add more labelled pairs + edge cases to `test_prototype.py` as the data grows.
@@ -399,6 +438,7 @@ Suggested split mirrors the original four tracks. Effort is a rough developer-ho
 | Add a workflow **action** | extend `ACTION_LABEL` + branch in `case_action` (`main.py`), permission in `roles.allowed_actions`, button in `CaseDetail.tsx` |
 | Add a **role** | add to `roles.PERSONAS` / `ROLE_LABELS`, update `allowed_actions`; the dropdown reads `/api/meta` |
 | Add an **institution field** | `db.SCHEMA` + `seed.build_institutions` + `Institution.tsx`, re-seed |
+| Swap in real **SMTP/SMS Notifier** | implement the `Notifier` protocol in `backend/app/notify.py` (`send(self, conn, message)`) and return it in `get_notifier()`; callers invoke `notify.dispatch_notification(...)` without modification |
 | Reset everything | Demo ▾ → Reset demo data, or `python run.py --reseed` |
 
 ---
@@ -411,7 +451,7 @@ Suggested split mirrors the original four tracks. Effort is a rough developer-ho
 Install `requirements-dev.txt` for pytest, HTTP client tests and coverage. Run
 `python -m pytest backend/tests -q --cov=backend/app --cov-report=term-missing`.
 `backend/tests/conftest.py` supplies an isolated database copy per test from one
-session-seeded template, plus `conn`, `client` and `as_role` fixtures. Test modules
+session-seeded template, plus `conn`, `client` (signed in as Senior Management), `anon_client` (no session) and `as_role(role, region)` fixtures. `as_role` returns real session-cookie headers for the demo account of that role, so tests exercise the same sign-in path as the browser; `X-Role` headers no longer mean anything. The conftest lowers the password hashing cost for speed (`AICTE_PBKDF2_ITERS`). Test modules
 must not set `AICTE_DB` at import time. `db.configure(path)` overrides the DB path;
 `db.configure()` restores environment-based configuration. Mark expensive workflow
 tests with `pytest.mark.slow` when appropriate.

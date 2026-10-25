@@ -15,7 +15,13 @@ python run.py                     # seeds the demo DB on first run, opens http:/
 
 Options: `python run.py --reseed` (rebuild the demo data), `python run.py --no-browser`.
 
-The built UI is committed in `frontend/dist`, so Node is **not** needed to run the demo.
+**Signing in.** Everything needs a signed-in account. In the default demo mode the sign-in page lists one account per role, all with the
+password `Demo@2026` (usernames `rb`, `pgrc`, `ab`, `lc`, `vig`, `senior`, `regional-western`, ...). For anything real run with
+`AICTE_DEMO_MODE=0`: no demo accounts or presenter endpoints are created and the first start prints a one-time password for a Senior
+`admin` account. Other settings: `AICTE_SESSION_IDLE_HOURS` (8), `AICTE_SESSION_MAX_HOURS` (12), `AICTE_COOKIE_SECURE=1` (behind HTTPS),
+`AICTE_DEMO_PASSWORD`.
+
+The built UI is included in the offline demo bundle published through GitHub Releases. Running the demo from a fresh source checkout requires Node.js to build the frontend. The packaged demo laptop needs Python only.
 
 ## Develop the UI (optional, needs Node 20+)
 
@@ -32,26 +38,29 @@ Run the backend in another terminal with `python run.py --no-browser`.
 
 - Seeded database: 60 institutions, 300 cases, 8 regions, planted overlaps, decoys and SLA cases
 - Explainable overlap engine (identity, fuzzy name, TF-IDF text, category, time window) with a "Why flagged" breakdown
-- Coordination Room: link cases, pick lead Bureau, comment, record decision
+- Coordination Room: link cases (detected or manual), add/remove cases, pick lead Bureau, comment, record decision
 - Dashboard with KPIs, charts, ageing, trend, risk-ranked institutions and live activity
-- **Simulate New Complaint** button: files a scripted complaint through the real pipeline and fires a live alert
-- **SLA engine**: countdown timers, 75% warnings, auto-escalation at 100% (Deputy Director) and 150% (Director),
-  ping-pong transfer alerts and daily pending-reminder digests. Demo > "Time machine: +7 days" triggers it live
+- **Demo mode** (role menu, top right, or Ctrl+Shift+D) shows presenter controls: *File a new complaint* runs a scripted complaint through the real pipeline and fires a live alert
+- **SLA engine & Simulated Outbox**: countdown timers, 75% warnings, auto-escalation at 100% (Deputy Director) and 150% (Director),
+  ping-pong transfer alerts, daily pending-reminder digests, and simulated email/SMS reminder dispatch with dedicated Outbox archive. Demo tools > "Jump 7 days ahead" triggers it live
 - **Case workflow & Audit Vault**: remark, assign, transfer, escalate, dispose; every action is hash-chained
-  in a tamper-evident ledger (`/audit`) with "Verify chain" and demo "Tamper with a record" button
+  in a tamper-evident ledger (`/audit`) with "Verify chain", individual block inspection, and demo "Tamper with a record" button
 - **Institution risk score** (volume + severity + repeat offences + overdue), colour-coded, with breakdown
-- **Role switcher** (RB, PGRC, AB, LC, VIG, Regional Office, Senior Management): different dashboards and a
-  server-enforced permission matrix (no login in this prototype)
+- **Signal design**: a midnight sidebar, saffron and cobalt accents, animated figures, and a one-click **dark theme** (moon/sun button, top bar)
+- **Real sign-in** (hashed passwords, server-side sessions, 15-minute lock-out after five wrong passwords, sign-in audit) with
+  roles RB, PGRC, AB, LC, VIG, Regional Office and Senior Management: different home screens and a server-enforced permission
+  matrix. Senior Management adds and manages accounts on **People and access**
 
 - **Natural-language search** (rule-based, offline): ask e.g. "pending RB cases in Western region older than 30 days";
   the Cases page shows exactly what it understood as chips
 - **India region heatmap** (pending / beyond timeline / average risk) - click a region to open its cases
-- **Reports & analytics**: Bureau-wise, region-wise, institution-wise, ageing, disposal rate, overlaps and
-  monthly/quarterly, each with CSV and PDF export; the case list also exports to CSV
+- **Reports & analytics**: Bureau-wise, region-wise, institution-wise, status-wise, ageing, disposal rate, overlaps and
+  monthly/quarterly with filter bar, each with CSV and PDF export; the case list and institution history also export to CSV
+- **Recorded coordination outcomes**: explicit officer reviews, room decisions, pending followers and decision time with source records; [counting rules](docs/COORDINATION_OUTCOMES.md). [Innovation review and integration findings](docs/INNOVATION_REVIEW.md).
 - **Supporting documents** on cases (upload/download, SHA-256 verified, recorded in the hash-chained history)
-- **Register complaint** (new page): live institution match and overlap preview while typing, plus bulk CSV import (validate first)
+- **Register complaint** (new page): live institution match and overlap preview while typing, plus bulk CSV import (validate first); complaints whose institution cannot be matched can be saved to the **Review queue** and registered later
 - **Coordination guard**: acting on an overlapping case needs a logged acknowledgement; after a MERGE the follower Bureau cannot transfer/escalate/dispose
-- **Daily briefing** for Senior Management / Regional Offices and a "duplicate effort saved" estimate on the dashboard
+- **Daily briefing** for Senior Management / Regional Offices, plus a hypothetical workload scenario with explicit assumptions in Reports
 
 ## Rehearsal & safety net
 

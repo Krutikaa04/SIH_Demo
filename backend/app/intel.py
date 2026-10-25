@@ -142,6 +142,7 @@ class TextModel:
                                    sublinear_tf=True, token_pattern=r"[a-z]{2,}")
         self.X = self.vec.fit_transform([docs[c] for c in self.ids])
         self.terms = self.vec.get_feature_names_out()
+        self.entities = {case_id: extract_entities(text) for case_id, text in docs.items()}
 
     def cosine(self, a, b):
         return float(self.X[self.idx[a]].multiply(self.X[self.idx[b]]).sum())
@@ -151,6 +152,10 @@ class TextModel:
         wb = {c: v for c, v in zip(rb.tocoo().col, rb.tocoo().data)}
         pairs = [(v * wb[c], self.terms[c]) for c, v in zip(ra.col, ra.data) if c in wb and " " not in self.terms[c]]
         return [t for _, t in sorted(pairs, reverse=True)[:n]]
+
+    def shared_entities(self, a, b):
+        return {key: sorted(set(self.entities[a][key]) & set(self.entities[b][key]))
+                for key in ("amount_values", "circulars", "roll_numbers")}
 
 
 # ---------------------------------------------------------------- scoring -----------
@@ -167,8 +172,10 @@ def _d(x):
     return x if isinstance(x, date) else datetime.strptime(x[:10], "%Y-%m-%d").date()
 
 
-def score_pair(a, b, tm):
+def score_pair(a, b, tm, *, include_entities=True):
     """Score two cases about the same institution. Returns None when not a candidate."""
+    if not a["institution_id"] or a["institution_id"] != b["institution_id"]:
+        return None
     # 1. identity (max 30)
     both_id = (a["resolution_method"] == "ID" and b["resolution_method"] == "ID"
                and a["submitted_aicte_id"] == b["submitted_aicte_id"])
@@ -227,7 +234,13 @@ def score_pair(a, b, tm):
     if text_pts + cat_pts < 10:
         return None
 
-    total = round(ident + name_pts + text_pts + cat_pts + time_pts)
+    base_points = ident + name_pts + text_pts + cat_pts + time_pts
+    matches = tm.shared_entities(a["case_id"], b["case_id"]) if include_entities else {}
+    requested_points, entity_detail = _entity_signal(matches)
+    entity_points = round(min(requested_points, max(0.0, 100 - base_points)), 1)
+    if entity_points < requested_points:
+        entity_detail += f"; bonus limited to {entity_points:g} to keep the overall score at most 100"
+    total = min(100, round(base_points + entity_points))
     band = "HIGH" if total >= HIGH else "MEDIUM" if total >= MEDIUM else None
     if band is None:
         return None
@@ -242,6 +255,8 @@ def score_pair(a, b, tm):
         {"signal": "text", "label": "Complaint text", "points": text_pts, "max": 25, "detail": text_d},
         {"signal": "category", "label": "Category", "points": cat_pts, "max": 15, "detail": cat_d},
         {"signal": "time", "label": "Time window", "points": time_pts, "max": 15, "detail": time_d},
+        {"signal": "entities", "label": "Shared references and amounts", "points": entity_points,
+         "max": 10, "detail": entity_detail},
     ]
     marks = {True: "✔", False: "✘"}
     lines = [f"{total}% – {band} – {headline}."]
@@ -253,6 +268,23 @@ def score_pair(a, b, tm):
                  else f"Both cases sit with {a['bureau_code']} but with different officers.")
     return {"score": total, "band": band, "type": "CROSS_BUREAU" if cross else "DUPLICATE",
             "breakdown": breakdown, "explanation": "\n".join(lines), "headline": headline}
+
+
+def _entity_signal(matches):
+    points, details = 0, []
+    amounts = matches.get("amount_values", [])
+    circulars = matches.get("circulars", [])
+    rolls = matches.get("roll_numbers", [])
+    if amounts:
+        points += 4
+        details.append("Same amount: " + ", ".join(f"₹{value:,}" for value in amounts[:3]))
+    if circulars:
+        points += 6
+        details.append("Same circular/reference: " + ", ".join(circulars[:3]))
+    if rolls:
+        points += 6
+        details.append("Same roll/registration number: " + ", ".join(rolls[:3]))
+    return min(10, points), "; ".join(details) or "No shared explicit amount, circular or roll number"
 
 
 # ---------------------------------------------------------------- detection ---------
@@ -358,16 +390,108 @@ def recluster(conn, institution_id):
                      (cid, *cases))
 
 
+# ---------------------------------------------------------------- entity extraction ---
+
+AMOUNT_PREFIX_RE = re.compile(
+    r"(?<!\w)(?:₹|Rs\.?|INR)\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*(lakhs?|crores?|cr\.?)?\b",
+    re.IGNORECASE
+)
+AMOUNT_SUFFIX_RE = re.compile(
+    r"\b([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*(lakhs?|crores?|cr\.?|rupees?)\b",
+    re.IGNORECASE
+)
+
+CIRCULAR_RE = re.compile(
+    r"\b(?:circular|ref(?:erence)?|notification|order|file|f\.?\s*no\.?)"
+    r"(?:\s*(?:no\.?|#|num(?:ber)?))?"
+    r"(?:\s*[:\-–/#]\s*|\s+|#)"
+    r"((?=[A-Za-z0-9\-/.]{2,}\b)[A-Za-z0-9\-/.]*\d[A-Za-z0-9\-/.]*)",
+    re.IGNORECASE
+)
+
+ROLL_RE = re.compile(
+    r"\b(?:roll|reg(?:istration)?|enrol(?:l)?ment|hall[- ]?ticket)"
+    r"(?:\s*(?:no\.?|#|num(?:ber)?))?"
+    r"(?:\s*[:\-–/#]\s*|\s+|#)"
+    r"((?=[A-Za-z0-9\-]{2,}\b)[A-Za-z0-9\-]*\d[A-Za-z0-9\-]*)",
+    re.IGNORECASE
+)
+
+
+def _parse_amount_to_number(num_str: str, unit: str = "") -> int:
+    clean_num = num_str.replace(",", "").strip()
+    try:
+        val = float(clean_num)
+    except ValueError:
+        return 0
+    unit_lower = (unit or "").lower().strip()
+    if "crore" in unit_lower or unit_lower in ("cr", "cr."):
+        val *= 10_000_000
+    elif "lakh" in unit_lower:
+        val *= 100_000
+    try:
+        return int(round(val))
+    except (OverflowError, ValueError):
+        return 0
+
+
 def extract_entities(text: str) -> dict:
-    """Extracts financial amounts, circular numbers, and roll/registration numbers from text."""
+    """Extracts financial amounts, circular numbers, and roll/registration numbers from text.
+
+    Accepted formats:
+      - Amounts: ₹45,000, Rs. 1.5 lakh, INR 50,000, 2 crore, 25000 rupees.
+      - Circulars: Circular No. AICTE/2026/04, F.No. 12-3/2025, Ref: AICTE-2023-11, Order #2024/99.
+      - Roll Numbers: Roll no: ENR-99214, Registration No. 2024-REG-991, Hall Ticket HT2026001.
+
+    Returns:
+      dict with keys:
+        amounts: list[str] of formatted amount strings (sorted unique)
+        amount_values: list[int] of numeric rupee values (sorted unique)
+        circulars: list[str] of uppercase normalised identifiers (sorted unique)
+        roll_numbers: list[str] of uppercase normalised identifiers (sorted unique)
+    """
     if not text:
-        return {"amounts": [], "circulars": [], "roll_numbers": []}
-    amounts = re.findall(r"(?:₹|Rs\.?|INR)\s*[\d,]+|(?:[\d,]+)\s*(?:rupees|lakh|crore)", text, re.IGNORECASE)
-    circulars = re.findall(r"(?:circular|ref|notification|order|file)\s*(?:no\.?|#)?\s*[\w\-/]+", text, re.IGNORECASE)
-    rolls = re.findall(r"(?:roll|reg|enrolment|enrollment|hall[- ]?ticket)\s*(?:no\.?|#)?\s*[\w\-]+", text, re.IGNORECASE)
+        return {"amounts": [], "amount_values": [], "circulars": [], "roll_numbers": []}
+
+    s = str(text)[:20000]
+
+    raw_amounts = []
+    amount_values = []
+
+    for m in AMOUNT_PREFIX_RE.finditer(s):
+        full_match = m.group(0).strip()
+        num_part = m.group(1)
+        unit_part = m.group(2) or ""
+        val = _parse_amount_to_number(num_part, unit_part)
+        if val > 0:
+            raw_amounts.append(full_match)
+            amount_values.append(val)
+
+    for m in AMOUNT_SUFFIX_RE.finditer(s):
+        full_match = m.group(0).strip()
+        num_part = m.group(1)
+        unit_part = m.group(2) or ""
+        val = _parse_amount_to_number(num_part, unit_part)
+        if val > 0 and full_match not in raw_amounts:
+            raw_amounts.append(full_match)
+            amount_values.append(val)
+
+    circulars = []
+    for m in CIRCULAR_RE.finditer(s):
+        ident = m.group(1).strip().rstrip(".,;:-/").upper()
+        if ident and any(c.isdigit() for c in ident):
+            circulars.append(ident)
+
+    roll_numbers = []
+    for m in ROLL_RE.finditer(s):
+        ident = m.group(1).strip().rstrip(".,;:-/").upper()
+        if ident and any(c.isdigit() for c in ident):
+            roll_numbers.append(ident)
+
     return {
-        "amounts": sorted(set(amounts)),
+        "amounts": sorted(set(raw_amounts)),
+        "amount_values": sorted(set(amount_values)),
         "circulars": sorted(set(circulars)),
-        "roll_numbers": sorted(set(rolls))
+        "roll_numbers": sorted(set(roll_numbers))
     }
 

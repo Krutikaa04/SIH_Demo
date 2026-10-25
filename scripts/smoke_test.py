@@ -5,6 +5,7 @@ and prints latencies. It RESETS the demo data at the start and at the end, so th
 """
 import base64
 import json
+import os
 import sys
 import time
 import urllib.error
@@ -16,8 +17,29 @@ OK, BAD = "✔", "✘"
 failures = []
 
 
+_SESSIONS = {}
+DEMO_PASSWORD = os.environ.get("AICTE_DEMO_PASSWORD", "Demo@2026")
+
+
+def _username(role, region):
+    return "regional-" + region.lower().replace(" ", "-") if role == "REGIONAL" else role.lower()
+
+
+def _session(role, region):
+    """Sign in as the demo account of this role (once) and keep its session cookie."""
+    key = (role, region if role == "REGIONAL" else "")
+    if key not in _SESSIONS:
+        req = urllib.request.Request(BASE + "/auth/login", method="POST", headers={"Content-Type": "application/json"},
+                                     data=json.dumps({"username": _username(role, region), "password": DEMO_PASSWORD}).encode())
+        with urllib.request.urlopen(req, timeout=60) as r:
+            cookie = next(c for c in r.headers.get_all("Set-Cookie") if c.startswith("icmd_session="))
+            _SESSIONS[key] = cookie.split(";")[0]
+    return _SESSIONS[key]
+
+
 def call(path, method="GET", body=None, role="SENIOR", region="Western", raw=False):
-    h = {"Content-Type": "application/json", "X-Role": role, "X-Region": region}
+    """Every call is made as a really signed-in demo user (the API ignores any role header)."""
+    h = {"Content-Type": "application/json", "Cookie": _session(role, region)}
     req = urllib.request.Request(BASE + path, method=method, headers=h,
                                  data=json.dumps(body).encode() if body is not None else None)
     t = time.time()
@@ -27,6 +49,17 @@ def call(path, method="GET", body=None, role="SENIOR", region="Western", raw=Fal
             return r.status, (data.decode("utf-8-sig") if raw else json.loads(data or b"null")), time.time() - t
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode()[:200], time.time() - t
+
+
+def _status(path, headers=None, method="GET", body=None):
+    """HTTP status of a call made WITHOUT any session cookie."""
+    req = urllib.request.Request(BASE + path, method=method, headers={"Content-Type": "application/json", **(headers or {})},
+                                 data=json.dumps(body).encode() if body is not None else None)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
 
 
 def check(name, cond, extra=""):
@@ -43,6 +76,13 @@ def flow(round_no):
     check("300 cases seeded", d["totals"]["received"] == 300, f"({d['totals']['received']})")
     check("11 open overlap clusters", d["overlap"]["open_clusters"] == 11, f"({d['overlap']['open_clusters']})")
     check("briefing present for Senior", len(d["briefing"]) >= 4)
+
+    check("sign-in: the API refuses callers who are not signed in (401)", _status("/cases?page_size=1") == 401)
+    check("sign-in: a spoofed role header signs nobody in (401)", _status("/users", {"X-Role": "SENIOR"}) == 401)
+    check("sign-in: the live event stream needs a session (401)", _status("/events") == 401)
+    check("sign-in: a wrong password is refused (401)", _status("/auth/login", method="POST", body={"username": "no.such.user", "password": "Wrong-pass1"}) == 401)
+    check("sign-in: a Bureau officer cannot open the user list (403)", call("/users", role="RB")[0] == 403)
+    check("sign-in: Senior Management can list accounts", call("/users")[0] == 200)
 
     _, nl, _ = call("/search/nl?q=" + urllib.parse.quote("pending RB cases in Western region older than 30 days"))
     _, res, _ = call("/cases?page_size=1&" + urllib.parse.urlencode(nl["params"]))
@@ -91,6 +131,45 @@ def flow(round_no):
     _, d, _ = call("/dashboard/summary")
     check("effort-saved counter ticks", d["effort_saved"]["clusters_resolved"] == 1)
 
+    other_inst = call("/institutions")[1]["items"][-1]["aicte_id"]
+    s, parked, _ = call("/complaints", "POST", {"institution_name": "Zzyzx Quorlfplat Institute of Nothing", "bureau": "RB",
+                                               "category": "Faculty Deficiency", "park_unmatched": True,
+                                               "description": "Students report that faculty positions are vacant and visiting teachers take classes."})
+    check("unmatched complaint is parked, not lost", s == 200 and parked["status"] == "PARKED")
+    _, q, _ = call("/unmatched")
+    check("review queue lists it", [i["id"] for i in q["items"]] == [parked["queue_id"]])
+    s, _, _ = call(f"/unmatched/{parked['queue_id']}/resolve", "POST", {"institution_id": other_inst}, role="PGRC")
+    check("another Bureau cannot resolve it (403)", s == 403)
+    s, res, _ = call(f"/unmatched/{parked['queue_id']}/resolve", "POST", {"institution_id": other_inst}, role="RB")
+    check("receiving Bureau resolves it into a real case", s == 200 and res["case"]["case_id"] and not res["already_resolved"])
+    _, q, _ = call("/unmatched")
+    check("queue is empty after resolving", q["counts"]["OPEN"] == 0 and q["counts"]["RESOLVED"] == 1)
+
+    _, pool, _ = call("/cases?page_size=200")
+    free = {}
+    for c in pool["items"]:
+        if not c["overlap"] and c["status"] != "Disposed" and c["institution"]["aicte_id"]:
+            free.setdefault(c["institution"]["aicte_id"], []).append(c)
+    pair = next(([a, b] for cs in free.values() for a in cs for b in cs
+                 if a["bureau"] != b["bureau"] and a["case_id"] < b["case_id"]), None)
+    check("two unlinked open cases exist at one institution", pair is not None)
+    a, b = pair
+    outsider = next(x for x in ("RB", "PGRC", "AB", "LC", "VIG") if x not in (a["bureau"], b["bureau"]))
+    link = {"case_a": a["case_id"], "case_b": b["case_id"], "rationale": "Same grievance in different words"}
+    s, _, _ = call("/links", "POST", link, role=outsider)
+    check("manual link: a Bureau owning neither case is refused (403)", s == 403)
+    s, _, _ = call("/links", "POST", link, role="REGIONAL")
+    check("manual link: Regional Office is refused (403)", s == 403)
+    s, made, _ = call("/links", "POST", link, role=a["bureau"])
+    check("manual link: owning Bureau links the cases", s == 200 and made["created"] and made["pair"]["type"] == "MANUAL")
+    s, again, _ = call("/links", "POST", link)
+    check("manual link is idempotent", s == 200 and not again["created"] and again["pair"]["id"] == made["pair"]["id"])
+    _, ov, _ = call("/overlaps")
+    check("manual link shows up in the overlaps list",
+          any(p["type"] == "MANUAL" for cl in ov["items"] for p in cl["pairs"]))
+    _, room2, _ = call("/rooms", "POST", {"cluster_id": made["cluster_id"]})
+    check("manual link can be opened as a Coordination Room", len(room2["cases"]) == 2 and room2["can_manage_members"])
+
     _, a0, _ = call("/alerts?unread=1")
     t = time.time()
     s, sim, _ = call("/simulate/complaint", "POST", {})
@@ -99,6 +178,13 @@ def flow(round_no):
           f"({sim['overlaps'][0]['score']}% in {ms:.0f} ms)" if s == 200 and sim["overlaps"] else "")
     _, a1, _ = call("/alerts?unread=1")
     check("alert raised", a1["unread"] > a0["unread"])
+    _, a_pg, _ = call("/alerts?limit=400", role="PGRC")
+    _, a_all, _ = call("/alerts?limit=400", role="SENIOR")
+    check("alerts are role-targeted: PGRC sees only PGRC-addressed or untargeted alerts",
+          all((not x["target_bureaus"]) or "PGRC" in x["target_bureaus"] for x in a_pg["items"]))
+    check("Senior Management sees more alerts than a single Bureau", len(a_all["items"]) > len(a_pg["items"]))
+    check("PGRC unread count matches its own visible list",
+          a_pg["unread"] == sum(1 for x in a_pg["items"] if not x["read"]))
 
     _, desk, _ = call("/dashboard/summary", role="PGRC")
     check("PGRC sees 'My desk'", desk["desk"] and desk["desk"]["bureau"] == "PGRC")
@@ -135,7 +221,7 @@ def sweep():
     print("\n=== Read-endpoint sweep for every role (no 5xx allowed) ===")
     paths = ["/meta", "/clock", "/dashboard/summary", "/cases?page_size=5", "/cases?overdue=1", "/cases?overlap=1",
              "/institutions", "/overlaps", "/overlaps?status=all", "/alerts", "/reports/bureau", "/reports/periodic?period=quarter",
-             "/search/nl?q=escalated%20faculty%20cases", "/audit/verify", "/export/cases?bureau=RB"]
+             "/search/nl?q=escalated%20faculty%20cases", "/audit/verify", "/export/cases?bureau=RB", "/unmatched"]
     slow = []
     for role in ["RB", "PGRC", "AB", "LC", "VIG", "REGIONAL", "SENIOR"]:
         for p in paths:

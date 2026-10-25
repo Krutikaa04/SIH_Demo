@@ -184,29 +184,107 @@ def clusters_view(conn, only_active=True):
 
 # ---- write flows ---------------------------------------------------------------------
 
+
+
 def next_case_number(conn, bureau, year):
     prefix = f"{bureau}/{year}/"
-    r = conn.execute("SELECT MAX(case_id) FROM cases WHERE case_id LIKE ?", (prefix + "%",)).fetchone()[0]
-    n = int(r.split("/")[-1]) + 1 if r else 1
-    return f"{prefix}{n:05d}"
+
+    # Preserve the highest case number already present in the database.
+    existing = conn.execute(
+        "SELECT MAX(CAST(SUBSTR(case_id, ?) AS INTEGER)) "
+        "FROM cases WHERE case_id LIKE ?",
+        (len(prefix) + 1, prefix + "%"),
+    ).fetchone()[0] or 0
+
+    # Initialize or synchronize the counter without moving it backwards.
+    conn.execute(
+        """
+        INSERT INTO case_number_counters(bureau, year, value)
+        VALUES (?, ?, ?)
+        ON CONFLICT(bureau, year) DO UPDATE
+        SET value = MAX(case_number_counters.value, excluded.value)
+        """,
+        (bureau, year, existing),
+    )
+
+    # Atomically allocate the next number.
+    row = conn.execute(
+        """
+        INSERT INTO case_number_counters(bureau, year, value)
+        VALUES (?, ?, 1)
+        ON CONFLICT(bureau, year) DO UPDATE
+        SET value = case_number_counters.value + 1
+        RETURNING value
+        """,
+        (bureau, year),
+    ).fetchone()
+
+    return f"{prefix}{int(row['value']):05d}"
+
 
 
 def create_alert(conn, type_, severity, message, case_id=None, institution_id=None, pair_id=None,
-                 cluster_id=None, created_at=None):
+                 cluster_id=None, created_at=None, target_bureaus=None):
+    """Create an alert. `target_bureaus` = Bureau codes the alert concerns (empty = visible to everyone)."""
     cur = conn.execute(
-        "INSERT INTO alerts(type,severity,case_id,institution_id,pair_id,cluster_id,message,created_at,is_read) "
-        "VALUES(?,?,?,?,?,?,?,?,0)",
+        "INSERT INTO alerts(type,severity,case_id,institution_id,pair_id,cluster_id,message,created_at,is_read,"
+        "target_bureaus) VALUES(?,?,?,?,?,?,?,?,0,?)",
         (type_, severity, case_id, institution_id, pair_id, cluster_id, message,
-         created_at or db.iso(db.now(conn))))
+         created_at or db.iso(db.now(conn)), db.fmt_targets(target_bureaus)))
     return cur.lastrowid
 
 
-def alert_view(conn, a):
+# ---- alert visibility (issue #12) ---------------------------------------------------------
+# Matrix: SENIOR sees every alert. A Bureau role (RB, PGRC, AB, LC, VIG) sees alerts whose target_bureaus contains
+# its code, plus untargeted ("global"/legacy) alerts. REGIONAL sees alerts about institutions in its region.
+# Read state is tracked per role (read_roles), so one Bureau reading a shared alert does not clear it for another.
+
+def alert_filter(ctx):
+    """(where_fragments, params) limiting the alerts table to what `ctx` may see."""
+    if ctx.role == "SENIOR":
+        return [], []
+    if ctx.role == "REGIONAL":
+        return ["institution_id IN (SELECT aicte_id FROM institutions WHERE region=?)"], [ctx.region]
+    return ["(target_bureaus IS NULL OR target_bureaus='' OR target_bureaus LIKE ?)"], [f"%,{ctx.role},%"]
+
+
+def unread_filter(role):
+    """(fragment, params): not read globally (legacy/seed) and not read by this role."""
+    return "(is_read=0 AND (read_roles IS NULL OR read_roles NOT LIKE ?))", [f"%,{role},%"]
+
+
+def alert_visible(conn, ctx, alert):
+    if ctx.role == "SENIOR":
+        return True
+    if ctx.role == "REGIONAL":
+        inst = db.one(conn, "SELECT region FROM institutions WHERE aicte_id=?", (alert["institution_id"],)) \
+            if alert["institution_id"] else None
+        return bool(inst and inst["region"] == ctx.region)
+    targets = db.parse_targets(alert.get("target_bureaus"))
+    return not targets or ctx.role in targets
+
+
+_MARK_READ = ("read_roles = CASE WHEN read_roles IS NULL OR read_roles = '' THEN ',' || ? || ',' "
+              "WHEN read_roles LIKE ? THEN read_roles ELSE read_roles || ? || ',' END")
+
+
+def mark_alerts_read(conn, ctx, alert_id=None):
+    """Mark one alert (or every alert visible to the role) as read FOR THIS ROLE ONLY."""
+    where, params = alert_filter(ctx)
+    if alert_id is not None:
+        where, params = where + ["id=?"], params + [alert_id]
+    w = ("WHERE " + " AND ".join(where)) if where else ""
+    conn.execute(f"UPDATE alerts SET {_MARK_READ} {w}", (ctx.role, f"%,{ctx.role},%", ctx.role, *params))
+
+
+def alert_view(conn, a, role=None):
     inst = db.one(conn, "SELECT name FROM institutions WHERE aicte_id=?", (a["institution_id"],)) if a["institution_id"] else None
     return {"id": a["id"], "type": a["type"], "severity": a["severity"], "message": a["message"],
             "case_id": a["case_id"], "institution_id": a["institution_id"],
             "institution_name": inst["name"] if inst else None, "pair_id": a["pair_id"],
-            "cluster_id": a["cluster_id"], "created_at": a["created_at"], "read": bool(a["is_read"]),
+            "cluster_id": a["cluster_id"], "created_at": a["created_at"],
+            "read": bool(a["is_read"]) or bool(role and f",{role}," in (a.get("read_roles") or "")),
+            "target_bureaus": db.parse_targets(a.get("target_bureaus")),
             "link": a.get("link") or (f"/overlaps?open={a['cluster_id']}" if a["type"] == "OVERLAP" and a["cluster_id"]
                                       else f"/cases/{a['case_id']}" if a["case_id"] else "/alerts")}
 
@@ -276,29 +354,59 @@ def resolve_institution(reg, d):
 
 def _finish_case(conn, case_id, pairs, notify=True):
     """Alerts + push events for freshly detected overlap pairs. Returns the created alert ids."""
-    alert_ids = []
+    alert_ids, targets = [], {}
     for p in pairs:
         cl = db.one(conn, "SELECT cluster_id FROM overlap_pairs WHERE id=?", (p["id"],))["cluster_id"]
         sev = "HIGH" if p["band"] == "HIGH" else "MEDIUM"
-        alert_ids.append(create_alert(conn, "OVERLAP", sev, p["headline"], case_id, p["institution_id"], p["id"], cl))
+        # an overlap concerns the Bureaus of BOTH cases
+        targets[p["id"]] = sorted({r["bureau_code"] for r in conn.execute(
+            "SELECT bureau_code FROM cases WHERE case_id IN (?,?)", (p["case_a"], p["case_b"]))})
+        alert_ids.append(create_alert(conn, "OVERLAP", sev, p["headline"], case_id, p["institution_id"], p["id"], cl,
+                                      target_bureaus=targets[p["id"]]))
     conn.commit()
     if notify:
         events.publish("case.created", {"case_id": case_id})
         for p in pairs:
+            inst = db.one(conn, "SELECT region FROM institutions WHERE aicte_id=?", (p["institution_id"],))
             events.publish("overlap.detected", {"pair_id": p["id"], "score": p["score"], "band": p["band"],
-                                                "case_id": case_id, "institution_id": p["institution_id"]})
+                                                "case_id": case_id, "institution_id": p["institution_id"],
+                                                "targets": targets[p["id"]], "region": inst["region"] if inst else None})
         for aid in alert_ids:
             events.publish("alert.created", alert_view(conn, db.one(conn, "SELECT * FROM alerts WHERE id=?", (aid,))))
         events.publish("dashboard.invalidate", {})
     return alert_ids
 
 
-def register_complaint(conn, d, ctx=None, notify=True, reg=None):
-    """Register one complaint through the REAL pipeline: resolve -> insert -> history -> overlap scoring -> alerts."""
+def park_complaint(conn, d, ctx, suggestions):
+    """Store a complaint whose institution could not be matched in the review queue (see unmatched.py)."""
+    dup = db.one(conn, "SELECT id FROM unmatched_complaints WHERE status='OPEN' AND bureau=? AND institution_name=? "
+                       "AND json_extract(payload,'$.description')=?", (d["bureau"], d["institution_name"], d["description"]))
+    if dup:
+        raise ValueError(f"This complaint is already waiting in the review queue as {dup['id']}")
+    queue_id = "UNM-%04d" % db.next_counter(conn, "unmatched_seq")
+    P = ctx.persona if ctx is not None else ("SYS", "Diary Section", "SYS")
+    top = suggestions[:5]
+    conn.execute("INSERT INTO unmatched_complaints(id,payload,institution_name,aicte_id,bureau,suggestions,created_by,"
+                 "created_by_role,created_at,status) VALUES(?,?,?,?,?,?,?,?,?,'OPEN')",
+                 (queue_id, json.dumps(d), d["institution_name"], d["aicte_id"], d["bureau"], json.dumps(top), P[1], P[2],
+                  db.iso(db.now(conn))))
+    conn.commit()
+    events.publish("dashboard.invalidate", {})
+    return {"status": "PARKED", "queue_id": queue_id, "suggestions": top}
+
+
+def register_complaint(conn, d, ctx=None, notify=True, reg=None, park_unmatched=False):
+    """Register one complaint through the REAL pipeline: resolve -> insert -> history -> overlap scoring -> alerts.
+
+    With park_unmatched an unmatchable institution does not raise Unresolved: the complaint is stored in the review
+    queue and {"status": "PARKED", "queue_id": ...} is returned instead of a case."""
     reg = reg or intel.Registry(conn)
     res = resolve_institution(reg, d)
     if not res:
-        raise Unresolved(reg.suggest(d["institution_name"]))
+        suggestions = reg.suggest(d["institution_name"])
+        if park_unmatched:
+            return park_complaint(conn, d, ctx, suggestions)
+        raise Unresolved(suggestions)
     twin = db.one(conn, "SELECT case_id FROM cases WHERE institution_id=? AND bureau_code=? AND description=? "
                         "AND status!='Disposed'", (res["institution_id"], d["bureau"], d["description"]))
     if twin:
@@ -396,8 +504,11 @@ CSV_ALIASES = {
 MAX_IMPORT_ROWS = 500
 
 
-def import_complaints(conn, csv_text, ctx, dry_run=True):
-    """Bulk import. dry_run validates and previews every row; otherwise valid rows are registered one by one."""
+def import_complaints(conn, csv_text, ctx, dry_run=True, park_unmatched=False):
+    """Bulk import. dry_run validates and previews every row; otherwise valid rows are registered one by one.
+
+    park_unmatched (real run only): rows whose institution cannot be matched go to the review queue instead of
+    being skipped."""
     import csv
     import io as _io
     text = csv_text.lstrip("\ufeff")
@@ -418,8 +529,15 @@ def import_complaints(conn, csv_text, ctx, dry_run=True):
             d = clean_complaint(conn, data, ctx)
             res = resolve_institution(reg, d)
             if not res:
+                suggestions = reg.suggest(d["institution_name"])
+                if park_unmatched and not dry_run:
+                    parked = park_complaint(conn, d, ctx, suggestions)
+                    results.append({"row": n, "status": "parked", "institution_name": label, "bureau": d["bureau"],
+                                    "category": d["category"], "queue_id": parked["queue_id"],
+                                    "message": "", "suggestions": suggestions[:3]})
+                    continue
                 results.append({"row": n, "status": "needs_review", "institution_name": label,
-                                "message": "Institution not matched with confidence", "suggestions": reg.suggest(d["institution_name"])[:3]})
+                                "message": "Institution not matched with confidence", "suggestions": suggestions[:3]})
                 continue
             iname = reg.by_id[res["institution_id"]]["name"]
             if dry_run:
@@ -441,7 +559,7 @@ def import_complaints(conn, csv_text, ctx, dry_run=True):
         except Unresolved as e:
             results.append({"row": n, "status": "needs_review", "institution_name": label,
                             "message": "Institution not matched with confidence", "suggestions": e.suggestions[:3]})
-    counts = {k: sum(1 for r in results if r["status"] == k) for k in ("created", "ok", "needs_review", "error")}
+    counts = {k: sum(1 for r in results if r["status"] == k) for k in ("created", "ok", "needs_review", "parked", "error")}
     counts["overlaps"] = sum(r.get("overlaps", 0) for r in results)
     if not dry_run and counts["created"]:
         events.publish("case.created", {"count": counts["created"]})
@@ -453,19 +571,32 @@ def import_complaints(conn, csv_text, ctx, dry_run=True):
 
 def simulate_complaint(conn, scenario=None):
     """File a scripted complaint through the same pipeline the Register form uses."""
-    n = int(db.get_setting(conn, "sim_counter", "0"))
     if scenario:
         n = int(scenario) - 1
+    else:
+        n = db.next_counter(conn, "sim_counter") - 1
+
     spec = seed.simulate_spec(conn, n)
-    db.set_setting(conn, "sim_counter", n + 1)
-    d = {"institution_name": spec["name"], "institution_id": None, "aicte_id": None, "bureau": spec["bureau"],
-         "category": spec["category"], "description": spec["text"], "severity": 4, "source": "CPGRAMS",
-         "received_on": str(db.now(conn).date())}
+
+    d = {
+        "institution_name": spec["name"],
+        "institution_id": None,
+        "aicte_id": None,
+        "bureau": spec["bureau"],
+        "category": spec["category"],
+        "description": spec["text"],
+        "severity": 4,
+        "source": "CPGRAMS",
+        "received_on": str(db.now(conn).date()),
+    }
+
     try:
         out = register_complaint(conn, d)
-    except Unresolved:  # scripted fallback: the demo must never fail on a garbled name
+    except Unresolved:
+        # Scripted fallback: the demo must never fail on a garbled name.
         d["institution_id"] = spec["institution"]["aicte_id"]
         out = register_complaint(conn, d)
+
     return {"case": out["case"], "overlaps": out["overlaps"]}
 
 

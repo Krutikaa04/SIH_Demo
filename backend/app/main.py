@@ -11,16 +11,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import db, events, extras, intel, reports, risk, roles, seed, services, sla, galaxy, briefings
+from . import auth, auth_routes, db, events, extras, intel, links, reports, risk, roles, seed, services, sla, galaxy, briefings, notify
 from .constants import (BUREAUS, BUREAU_ORDER, CATEGORIES, OPEN_STATUSES, REGION_STATES, SLA_DAYS, STATUSES)
 from .roles import get_ctx
 
 DIST = db.ROOT / "frontend" / "dist"
 
 
+def _bootstrap_auth():
+    conn = db.connect()
+    try:
+        auth.bootstrap(conn)
+    finally:
+        conn.close()
+
+
 @asynccontextmanager
 async def lifespan(app):
     events.bind_loop(asyncio.get_running_loop())
+    await asyncio.to_thread(_bootstrap_auth)  # make sure someone can sign in (demo accounts, or a one-time admin)
 
     def _tick():
         conn = db.connect()
@@ -43,9 +52,42 @@ async def lifespan(app):
     task.cancel()
 
 
-app = FastAPI(title="AICTE Integrated Complaint Monitoring", lifespan=lifespan)
+def _demo_only():
+    """Presenter endpoints exist only while demo mode is on (AICTE_DEMO_MODE)."""
+    if not auth.demo_mode():
+        raise HTTPException(404, "Not available")
+
+
+class SecurityHeaders:
+    """Pure ASGI middleware (safe for the SSE stream): no-sniff, no framing, no caching of API responses."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        is_api = scope["path"].startswith("/api/")
+
+        async def wrapped(message):
+            if message["type"] == "http.response.start":
+                headers = message.setdefault("headers", [])
+                have = {k.lower() for k, _ in headers}
+                add = [(b"x-content-type-options", b"nosniff"), (b"x-frame-options", b"DENY"), (b"referrer-policy", b"same-origin")]
+                if is_api and b"cache-control" not in have:
+                    add.append((b"cache-control", b"no-store"))
+                headers.extend(h for h in add if h[0] not in have)
+            await send(message)
+
+        await self.app(scope, receive, wrapped)
+
+
+# Every /api route requires a signed-in session (see auth.require_auth); only the sign-in calls are public.
+app = FastAPI(title="AICTE Integrated Complaint Monitoring", lifespan=lifespan, dependencies=[Depends(auth.require_auth)])
+app.add_middleware(SecurityHeaders)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
                    allow_methods=["*"], allow_headers=["*"])
+app.include_router(auth_routes.router)
 app.include_router(extras.router)  # registered first so /api/cases/{id}/documents wins over the catch-all id route
 
 
@@ -88,8 +130,16 @@ def list_cases(q: str = "", bureau: str = "", region: str = "", category: str = 
     where, params = services.case_where(today, q, bureau, region, category, status, institution_id, date_from,
                                         date_to, overdue, overlap, nearing, age_gt, age_lt)
     w = ("WHERE " + " AND ".join(where)) if where else ""
-    order = {"received_desc": "c.received_on DESC, c.case_id", "received_asc": "c.received_on ASC, c.case_id",
-             "due_asc": "c.due_date ASC", "severity_desc": "c.severity DESC, c.received_on"}.get(sort, "c.received_on DESC")
+    order = {
+        "received_desc": "c.received_on DESC, c.case_id",
+        "received_asc": "c.received_on ASC, c.case_id",
+        "due_asc": "c.due_date ASC",
+        "due_desc": "c.due_date DESC",
+        "severity_desc": "c.severity DESC, c.received_on",
+        "severity_asc": "c.severity ASC, c.received_on",
+        "last_action_desc": "c.last_action_at DESC",
+        "last_action_asc": "c.last_action_at ASC",
+    }.get(sort, "c.received_on DESC")
     total = conn.execute(f"SELECT COUNT(*) FROM cases c LEFT JOIN institutions i ON i.aicte_id=c.institution_id {w}",
                          params).fetchone()[0]
     page_size = max(1, min(page_size, 200))
@@ -200,10 +250,10 @@ def case_action(case_id: str, body: dict = Body(...), conn=Depends(db.get_conn),
         conn.execute("UPDATE cases SET pingpong_at=? WHERE case_id=?", (stamp, case_id))
         services.create_alert(conn, "PING_PONG", "MEDIUM",
                               f"{case_id} has been transferred {upd['transfer_count']} times — possible ping-pong; fix ownership",
-                              case_id, c["institution_id"])
+                              case_id, c["institution_id"], target_bureaus=[c["bureau_code"], upd["bureau_code"]])
     if kind == "escalate":
         services.create_alert(conn, "ESCALATION", "HIGH", f"{case_id} escalated to {boss['designation']}",
-                              case_id, c["institution_id"])
+                              case_id, c["institution_id"], target_bureaus=[c["bureau_code"]])
     conn.commit()
     events.publish("case.updated", {"case_id": case_id})
     events.publish("dashboard.invalidate", {})
@@ -436,14 +486,14 @@ def galaxy_graph(bureau: str = Query(default=None), conn=Depends(db.get_conn)):
 
 
 @app.get("/api/briefings/executive")
-def executive_briefing(conn=Depends(db.get_conn)):
-    return briefings.generate_executive_briefing(conn)
+def executive_briefing(conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    return briefings.generate_executive_briefing(conn, ctx)
 
 
 
 # ------------------------------------------------------------------ rooms ----------
 
-def _room_view(conn, rid):
+def _room_view(conn, rid, ctx=None):
     r = db.one(conn, "SELECT * FROM coordination_rooms WHERE id=?", (rid,))
     if not r:
         raise HTTPException(404, "room not found")
@@ -457,10 +507,13 @@ def _room_view(conn, rid):
     timeline.sort(key=lambda e: e["ts"], reverse=True)
     pairs = [services.pair_view(p) for p in db.rows(conn, "SELECT * FROM overlap_pairs WHERE cluster_id=? ORDER BY score DESC",
                                                     (r["cluster_id"],))]
-    return {"id": r["id"], "cluster_id": r["cluster_id"], "institution": inst, "lead_bureau": r["lead_bureau"],
+    view = {"id": r["id"], "cluster_id": r["cluster_id"], "institution": inst, "lead_bureau": r["lead_bureau"],
             "status": r["status"], "decision": json.loads(r["decision"]) if r["decision"] else None,
             "created_at": r["created_at"], "resolved_at": r["resolved_at"], "cases": cases, "comments": comments,
-            "timeline": timeline[:40], "pairs": pairs}
+            "timeline": timeline[:40], "pairs": pairs, "can_manage_members": False}
+    if ctx is not None:
+        view["can_manage_members"] = links.can_manage_room(ctx, view)
+    return view
 
 
 @app.post("/api/rooms")
@@ -473,7 +526,7 @@ def create_room(body: dict = Body(...), conn=Depends(db.get_conn), ctx=Depends(g
         raise HTTPException(400, "cluster_id required")
     existing = db.one(conn, "SELECT id FROM coordination_rooms WHERE cluster_id=?", (cid,))
     if existing:
-        return _room_view(conn, existing["id"])
+        return _room_view(conn, existing["id"], ctx)
     cases = db.rows(conn, "SELECT case_id,institution_id,bureau_code,received_on FROM cases WHERE cluster_id=? "
                           "ORDER BY received_on", (cid,))
     if not cases:
@@ -493,12 +546,44 @@ def create_room(body: dict = Body(...), conn=Depends(db.get_conn), ctx=Depends(g
     conn.commit()
     events.publish("room.created", {"room_id": rid})
     events.publish("dashboard.invalidate", {})
-    return _room_view(conn, rid)
+    return _room_view(conn, rid, ctx)
 
 
 @app.get("/api/rooms/{room_id}")
-def get_room(room_id: str, conn=Depends(db.get_conn)):
-    return _room_view(conn, room_id)
+def get_room(room_id: str, conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    return _room_view(conn, room_id, ctx)
+
+
+@app.post("/api/links")
+def create_link(body: dict = Body(...), conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    """Manually link two cases of the same institution (outside what the engine detected)."""
+    out = links.link_cases(conn, ctx, body.get("case_a"), body.get("case_b"), body.get("rationale"))
+    conn.commit()
+    if out["created"]:
+        events.publish("dashboard.invalidate", {})
+        if out["room_id"]:
+            events.publish("room.updated", {"room_id": out["room_id"]})
+    return out
+
+
+@app.post("/api/rooms/{room_id}/cases")
+def add_room_case(room_id: str, body: dict = Body(...), conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    if not body.get("case_id"):
+        raise HTTPException(400, "case_id required")
+    links.add_to_room(conn, ctx, room_id, body["case_id"], body.get("rationale"))
+    conn.commit()
+    events.publish("room.updated", {"room_id": room_id})
+    events.publish("dashboard.invalidate", {})
+    return _room_view(conn, room_id, ctx)
+
+
+@app.delete("/api/rooms/{room_id}/cases/{case_id:path}")
+def remove_room_case(room_id: str, case_id: str, reason: str = "", conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    links.remove_from_room(conn, ctx, room_id, case_id, reason)
+    conn.commit()
+    events.publish("room.updated", {"room_id": room_id})
+    events.publish("dashboard.invalidate", {})
+    return _room_view(conn, room_id, ctx)
 
 
 @app.post("/api/rooms/{room_id}/comments")
@@ -511,7 +596,7 @@ def add_comment(room_id: str, body: dict = Body(...), conn=Depends(db.get_conn),
                  (room_id, ctx.persona[1], ctx.persona[2], text, db.iso(db.now(conn))))
     conn.commit()
     events.publish("room.updated", {"room_id": room_id})
-    return _room_view(conn, room_id)
+    return _room_view(conn, room_id, ctx)
 
 
 @app.post("/api/rooms/{room_id}/lead")
@@ -527,7 +612,7 @@ def set_lead(room_id: str, body: dict = Body(...), conn=Depends(db.get_conn), ct
                  (room_id, "System", "SYS", f"Lead Bureau set to {lead}.", db.iso(db.now(conn))))
     conn.commit()
     events.publish("room.updated", {"room_id": room_id})
-    return _room_view(conn, room_id)
+    return _room_view(conn, room_id, ctx)
 
 
 @app.post("/api/rooms/{room_id}/decision")
@@ -559,42 +644,110 @@ def decide(room_id: str, body: dict = Body(...), conn=Depends(db.get_conn), ctx=
     conn.commit()
     events.publish("room.updated", {"room_id": room_id})
     events.publish("dashboard.invalidate", {})
-    return _room_view(conn, room_id)
+    return _room_view(conn, room_id, ctx)
 
 
 # ------------------------------------------------------------------ alerts ---------
 
 @app.get("/api/alerts")
 def alerts(unread: int = 0, type: str = "", limit: int = 100, conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
-    where, params = [], []
+    """Alerts visible to the caller's role (see services.alert_filter). `unread` counts ALL visible unread alerts."""
+    base, base_params = services.alert_filter(ctx)
+    unread_sql, unread_params = services.unread_filter(ctx.role)
+    where, params = list(base), list(base_params)
     if unread:
-        where.append("is_read=0")
+        where.append(unread_sql)
+        params += unread_params
     if type:
-        where.append("type=?"); params.append(type)
+        where.append("type=?")
+        params.append(type)
     w = ("WHERE " + " AND ".join(where)) if where else ""
-    rows = db.rows(conn, f"SELECT * FROM alerts {w} ORDER BY created_at DESC, id DESC LIMIT ?", (*params, 400))
-    items = [services.alert_view(conn, a) for a in rows]
-    if ctx.role == "REGIONAL":
-        reg = {r["aicte_id"]: r["region"] for r in db.rows(conn, "SELECT aicte_id,region FROM institutions")}
-        items = [a for a in items if a["institution_id"] and reg.get(a["institution_id"]) == ctx.region]
-    return {"items": items[:limit], "unread": sum(1 for a in items if not a["read"])}
+    rows = db.rows(conn, f"SELECT * FROM alerts {w} ORDER BY created_at DESC, id DESC LIMIT ?",
+                   (*params, max(1, min(limit, 400))))
+    count_where = " AND ".join(base + [unread_sql])
+    total_unread = conn.execute(f"SELECT COUNT(*) FROM alerts WHERE {count_where}",
+                                (*base_params, *unread_params)).fetchone()[0]
+    return {"items": [services.alert_view(conn, a, role=ctx.role) for a in rows], "unread": total_unread}
 
 
 @app.post("/api/alerts/{alert_id}/read")
-def read_alert(alert_id: int, conn=Depends(db.get_conn)):
-    conn.execute("UPDATE alerts SET is_read=1 WHERE id=?", (alert_id,))
+def read_alert(alert_id: int, conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    alert = db.one(conn, "SELECT * FROM alerts WHERE id=?", (alert_id,))
+    if not alert or not services.alert_visible(conn, ctx, alert):
+        raise HTTPException(404, "Alert not found")
+    services.mark_alerts_read(conn, ctx, alert_id)
     return {"ok": True}
 
 
 @app.post("/api/alerts/read-all")
-def read_all(conn=Depends(db.get_conn)):
-    conn.execute("UPDATE alerts SET is_read=1")
+def read_all(conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    services.mark_alerts_read(conn, ctx)  # only the alerts this role can see, and only for this role
     return {"ok": True}
+
+
+@app.post("/api/alerts/{alert_id}/notify")
+def dispatch_alert_reminder(alert_id: int, body: dict = Body(default={}),
+                            conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    if ctx.role == "REGIONAL":
+        raise HTTPException(403, "Regional role cannot dispatch reminder notifications")
+    alert = db.one(conn, "SELECT * FROM alerts WHERE id=?", (alert_id,))
+    if not alert:
+        raise HTTPException(404, "Alert not found")
+    if not services.alert_visible(conn, ctx, alert):
+        raise HTTPException(403, "This alert is not addressed to your role")
+    if ctx.role in BUREAUS:
+        if alert["case_id"]:
+            c = db.one(conn, "SELECT bureau_code FROM cases WHERE case_id=?", (alert["case_id"],))
+            if c and c["bureau_code"] != ctx.role:
+                raise HTTPException(403, f"Bureau {ctx.role} cannot dispatch reminders for {c['bureau_code']} cases")
+    channel = body.get("channel", "email")
+    actor = f"{ctx.role} Officer" if ctx.role in BUREAUS else ("Senior Management" if ctx.role == "SENIOR" else ctx.role)
+    try:
+        res = notify.dispatch_notification(conn, alert_id, channel=channel, created_by=actor)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except KeyError:
+        raise HTTPException(404, "Alert not found")
+    return res
+
+
+@app.get("/api/alerts/{alert_id}/notify/preview")
+def preview_alert_reminder(alert_id: int, channel: str = "email",
+                           conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    if ctx.role == "REGIONAL":
+        raise HTTPException(403, "Regional role cannot preview reminder notifications")
+    alert = db.one(conn, "SELECT * FROM alerts WHERE id=?", (alert_id,))
+    if not alert:
+        raise HTTPException(404, "Alert not found")
+    if not services.alert_visible(conn, ctx, alert):
+        raise HTTPException(403, "This alert is not addressed to your role")
+    if ctx.role in BUREAUS:
+        if alert["case_id"]:
+            c = db.one(conn, "SELECT bureau_code FROM cases WHERE case_id=?", (alert["case_id"],))
+            if c and c["bureau_code"] != ctx.role:
+                raise HTTPException(403, f"Bureau {ctx.role} cannot preview reminders for {c['bureau_code']} cases")
+    if channel.lower() not in ("email", "sms"):
+        raise HTTPException(400, "Invalid channel: must be 'email' or 'sms'")
+    preview = notify.render_notification(conn, alert, channel=channel)
+    preview["is_simulated"] = True
+    return preview
+
+
+@app.get("/api/outbox")
+def list_outbox(limit: int = 50, channel: str = "", conn=Depends(db.get_conn), ctx=Depends(get_ctx)):
+    where, params = [], []
+    if channel:
+        where.append("channel=?")
+        params.append(channel.lower())
+    w = ("WHERE " + " AND ".join(where)) if where else ""
+    sql = f"SELECT * FROM outbox {w} ORDER BY id DESC LIMIT ?"
+    items = db.rows(conn, sql, (*params, min(limit, 200)))
+    return {"items": items, "total": len(items)}
 
 
 # ------------------------------------------------------------------ demo / admin ---
 
-@app.post("/api/simulate/complaint")
+@app.post("/api/simulate/complaint", dependencies=[Depends(_demo_only)])
 def simulate(body: dict = Body(default={}), conn=Depends(db.get_conn)):
     return services.simulate_complaint(conn, body.get("scenario"))
 
@@ -699,7 +852,7 @@ def verify(case_id: str = "", conn=Depends(db.get_conn)):
     return db.verify_chain(conn, case_id or None)
 
 
-@app.post("/api/admin/reset")
+@app.post("/api/admin/reset", dependencies=[Depends(_demo_only)])
 def reset():
     db.READY.wait(30)
     db.READY.clear()  # hold back all other requests until the rebuild is complete
@@ -715,7 +868,7 @@ def reset():
     return {"ok": True}
 
 
-@app.post("/api/admin/clock")
+@app.post("/api/admin/clock", dependencies=[Depends(_demo_only)])
 def clock(body: dict = Body(...), conn=Depends(db.get_conn)):
     """Time machine: advance the demo clock, then let the SLA engine react immediately."""
     off = int(db.get_setting(conn, "clock_offset_days", "0")) + int(body.get("add_days", 0))
@@ -727,7 +880,7 @@ def clock(body: dict = Body(...), conn=Depends(db.get_conn)):
     return {"offset_days": off, "now": db.iso(db.now(conn)), "sla": summary}
 
 
-@app.post("/api/admin/tamper")
+@app.post("/api/admin/tamper", dependencies=[Depends(_demo_only)])
 def tamper(body: dict = Body(default={}), conn=Depends(db.get_conn)):
     """Demo only: alter a history record behind the application's back (raw UPDATE, no re-hash)."""
     case_id, seq = body.get("case_id"), int(body.get("seq") or 2)
@@ -753,7 +906,7 @@ def tamper(body: dict = Body(default={}), conn=Depends(db.get_conn)):
     return {"case_id": case_id, "seq": seq}
 
 
-@app.post("/api/admin/restore-tamper")
+@app.post("/api/admin/restore-tamper", dependencies=[Depends(_demo_only)])
 def restore_tamper(conn=Depends(db.get_conn)):
     """Restores the tampered record to its original pristine state and re-verifies the chain."""
     ids = [x for x in (db.get_setting(conn, "tampered_row_ids", "") or "").split(",") if x]
