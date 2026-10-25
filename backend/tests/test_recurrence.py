@@ -150,8 +150,8 @@ def test_invalid_current_receipt_is_excluded(conn, records, received):
 
 
 @pytest.mark.parametrize("region", ["", "Unknown", "western", " Western "])
-def test_invalid_regional_identity_fails_closed(client, as_role, region):
-    response = client.get(f"/api/institutions/{HERO}/aftercare", headers=as_role("REGIONAL", region))
+def test_invalid_regional_identity_fails_closed(client, corrupt_regional, region):
+    response = client.get(f"/api/institutions/{HERO}/aftercare", headers=corrupt_regional(region))
     assert response.status_code == 403
     assert "items" not in response.json()
 
@@ -174,13 +174,13 @@ def test_empty_history_is_explicit(conn, records):
     assert report["summary"] == {"open_cases_checked": 0, "valid_closures": 0, "excluded_records": 0}
 
 
-def test_reads_do_not_change_database_or_audit_chain(client, conn, db_path, as_role, monkeypatch):
+def test_reads_do_not_change_database_or_audit_chain(client, conn, db_path, as_role):
+    sessions = [as_role(role, region) for role, region in [("SENIOR", ""), ("RB", ""), ("REGIONAL", "Western")]]
     before = hashlib.sha256(db_path.read_bytes()).hexdigest()
     before_dump = list(conn.iterdump())
     before_chain = db.verify_chain(conn)
-    monkeypatch.setattr(db, "connect", lambda: pytest.fail("Aftercare must not run connection-time migrations"))
-    for role, region in [("SENIOR", ""), ("RB", ""), ("REGIONAL", "Western")]:
-        assert client.get(f"/api/institutions/{HERO}/aftercare", headers=as_role(role, region)).status_code == 200
+    for headers in sessions:
+        assert client.get(f"/api/institutions/{HERO}/aftercare", headers=headers).status_code == 200
     assert list(conn.iterdump()) == before_dump
     assert db.verify_chain(conn) == before_chain
     assert hashlib.sha256(db_path.read_bytes()).hexdigest() == before

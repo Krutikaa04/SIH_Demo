@@ -45,13 +45,15 @@ malformed records are counted separately.
 Regional viewers require an exact valid region. Missing/unknown regions fail
 closed with 403; an institution outside the region also returns 403. Unknown
 institutions return 404. Bureau and Senior viewers retain the prototype's
-institution-level read access. These header roles are the existing demonstration
-identity model, not authentication.
+institution-level read access. Identity comes from the existing authenticated
+session; request role headers do not change the signed-in identity.
 
 The router is mounted at the end of the existing extras router, preserving its
 registration before the main application's greedy case routes. It opens SQLite in
 `mode=ro`, respects the demo-reset readiness lock, and runs only SELECT queries.
-It bypasses the normal connection helper's migration DDL. A missing database
+Its data connection bypasses the normal helper's migration DDL. Authentication
+still uses the application session dependency and can maintain session metadata.
+A missing database
 returns 503 without creating a file. No schema changes or migrations are needed.
 
 Institution and aftercare components remount on institution/role/region identity
