@@ -1,6 +1,6 @@
-"""Prototype role model. No login: the UI sends X-Role / X-Region headers and the API enforces the matrix.
+"""Roles and permissions. Who the caller is comes from the signed-in session (see auth.py), never from request headers.
 
-Production would use AICTE SSO (e-Office) with RBAC/ABAC and MFA.
+The permission matrix below is unchanged: it decides what each role may do once a user is authenticated.
 """
 from fastapi import HTTPException, Request
 
@@ -38,16 +38,20 @@ class Ctx(dict):
         return self["role"] in BUREAUS
 
 
+def ctx_for(user) -> Ctx:
+    """Build the request context from an authenticated user row."""
+    role = user["role"]
+    region = (user["region"] or "") if role == "REGIONAL" else ""
+    bureau = role  # Bureau roles act as their Bureau; Senior and Regional keep their role name
+    persona = (user.get("officer_id") or f"USR-{user['id']:04d}", user["display_name"], bureau)
+    return Ctx(role=role, region=region, persona=persona, user_id=user["id"], username=user["username"])
+
+
 def get_ctx(request: Request) -> Ctx:
-    role = (request.headers.get("x-role") or "SENIOR").upper()
-    if role not in ROLE_LABELS:
-        role = "SENIOR"
-    region = request.headers.get("x-region") or ""
-    if role == "REGIONAL":
-        persona = ("OFF-RO-01", f"Regional Officer, {region or 'Region'}", "REGIONAL")
-    else:
-        persona = PERSONAS[role]
-    return Ctx(role=role, region=region if role == "REGIONAL" else "", persona=persona)
+    user = getattr(request.state, "user", None)
+    if not user:  # the global auth dependency normally rejects first; this is the second lock
+        raise HTTPException(401, detail={"code": "AUTH_REQUIRED", "message": "Please sign in."})
+    return ctx_for(user)
 
 
 def allowed_actions(ctx, case_bureau, case_region, status):
