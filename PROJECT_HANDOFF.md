@@ -455,3 +455,22 @@ session-seeded template, plus `conn`, `client` (signed in as Senior Management),
 must not set `AICTE_DB` at import time. `db.configure(path)` overrides the DB path;
 `db.configure()` restores environment-based configuration. Mark expensive workflow
 tests with `pytest.mark.slow` when appropriate.
+
+## Issue #10 — Connection Galaxy Truncation and Filters
+
+- Added accurate `totalCases`, `shownCases`, and `truncated` response fields.
+- Added region, institution, and clustered-cases-only filters.
+- Added a configurable case limit (default 120, maximum 400).
+- Prioritized active-cluster cases, then overdue cases and higher severity.
+- Optimized institution counts and prevented dangling graph edges.
+- Kept rejected overlap pairs hidden and preserved existing response keys and node types.
+- Added frontend filter controls and a truncation notice.
+
+**API:** `GET /api/galaxy/graph`
+
+**Query parameters:** `bureau`, `region`, `institution_id`, `cluster_only`, `limit`.
+
+**Validation:**
+- Backend tests: `py -3.12 -m pytest backend/tests -q`
+- Frontend build: `cd frontend; npm run build`
+- Measured graph-generation time: 6.7 ms on the current test database (target: under 300 ms).

@@ -98,10 +98,28 @@ const nodeTypes = {
 
 export default function Galaxy() {
   const nav = useNavigate()
-  const [bureau, setBureau] = useState<string>('')
-  const [selectedEntity, setSelectedEntity] = useState<any>(null)
-  const qs = bureau ? `?bureau=${bureau}` : ''
-  const { data: graphData, loading, error } = useApi<any>(`/galaxy/graph${qs}`)
+
+const [bureau, setBureau] = useState<string>('')
+const [region, setRegion] = useState<string>('')
+const [institutionId, setInstitutionId] = useState<string>('')
+const [clusterOnly, setClusterOnly] = useState(false)
+const [selectedEntity, setSelectedEntity] = useState<any>(null)
+
+const qs = useMemo(() => {
+  const params = new URLSearchParams()
+  if (bureau) params.set('bureau', bureau)
+  if (region) params.set('region', region)
+  if (institutionId) params.set('institution_id', institutionId)
+  if (clusterOnly) params.set('cluster_only', 'true')
+
+  const query = params.toString()
+  return query ? `?${query}` : ''
+}, [bureau, region, institutionId, clusterOnly])
+
+const { data: graphData, loading, error } = useApi<any>(
+  `/galaxy/graph${qs}`
+)
+
 
   const nodes = useMemo(() => graphData?.nodes || [], [graphData])
   const edges = useMemo(() => graphData?.edges || [], [graphData])
@@ -144,6 +162,52 @@ export default function Galaxy() {
           ))}
         </div>
 
+{/* Additional Galaxy Filters */}
+<div className="flex flex-wrap items-center gap-3">
+  <select
+    value={region}
+    onChange={(e) => {
+      setRegion(e.target.value)
+      setInstitutionId('')
+    }}
+    aria-label="Filter by region"
+    className="rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-200"
+  >
+    <option value="">All Regions</option>
+    {(graphData?.filterOptions?.regions || []).map((value: string) => (
+      <option key={value} value={value}>
+        {value}
+      </option>
+    ))}
+  </select>
+
+  <select
+    value={institutionId}
+    onChange={(e) => setInstitutionId(e.target.value)}
+    aria-label="Filter by institution"
+    className="max-w-64 rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-200"
+  >
+    <option value="">All Institutions</option>
+    {(graphData?.filterOptions?.institutions || [])
+      .filter((inst: any) => !region || inst.region?.toLowerCase() === region.toLowerCase())
+      .map((inst: any) => (
+        <option key={inst.id} value={inst.id}>
+          {inst.label}
+        </option>
+      ))}
+  </select>
+
+  <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+    <input
+      type="checkbox"
+      checked={clusterOnly}
+      onChange={(e) => setClusterOnly(e.target.checked)}
+      className="accent-cyan-500"
+    />
+    Clustered cases only
+  </label>
+</div>
+
         {/* Legend */}
         <div className="hidden lg:flex items-center gap-3 text-[11px] text-slate-600">
           <span className="flex items-center gap-1">
@@ -157,6 +221,18 @@ export default function Galaxy() {
           </span>
         </div>
       </div>
+
+{graphData?.truncated && (
+  <div
+    role="status"
+    className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200"
+  >
+    <AlertTriangle size={16} />
+    <span>
+      Showing {graphData.shownCases} of {graphData.totalCases} cases — narrow with filters.
+    </span>
+  </div>
+)}
 
       {/* Canvas Area */}
       <div className="relative flex-1 overflow-hidden rounded-xl border border-slate-200 bg-slate-950 shadow-inner">

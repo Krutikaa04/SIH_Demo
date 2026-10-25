@@ -480,9 +480,25 @@ def review_overlap_pair(pair_id: str, body: dict = Body(...), conn=Depends(db.ge
     return {"ok": True, "pair_id": pair_id, "status": decision, "review_rationale": rationale, "review_by": actor_name, "review_at": now_iso}
 
 
+
 @app.get("/api/galaxy/graph")
-def galaxy_graph(bureau: str = Query(default=None), conn=Depends(db.get_conn)):
-    return galaxy.generate_galaxy_graph(conn, bureau_filter=bureau)
+def galaxy_graph(
+    bureau: str = Query(default=None),
+    region: str = Query(default=None),
+    institution_id: str = Query(default=None),
+    cluster_only: bool = Query(default=False),
+    limit: int = Query(default=120, ge=1, le=400),
+    conn=Depends(db.get_conn),
+):
+    return galaxy.generate_galaxy_graph(
+        conn,
+        bureau_filter=bureau,
+        region=region,
+        institution_id=institution_id,
+        cluster_only=cluster_only,
+        limit=limit,
+    )
+
 
 
 @app.get("/api/briefings/executive")

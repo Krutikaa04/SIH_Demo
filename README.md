@@ -89,3 +89,31 @@ Tests seed one temporary template and copy it for every test; they never use the
 DB. Fixtures are `db_path`, `conn`, `client`, and `as_role(role, region=None)`.
 Use `db.configure(path)` to override the database location, or `db.configure()` to
 return to the `AICTE_DB` environment setting, resolved when a connection is opened.
+
+## Connection Galaxy — Filtering and Case Limits
+
+The Connection Galaxy API provides an interactive graph of cases, institutions,
+bureaus, and overlap clusters.
+
+**Endpoint:** `GET /api/galaxy/graph`
+
+| Parameter        | Default          | Description                                        |
+| ---------------- | ---------------- | -------------------------------------------------- |
+| `bureau`         | All bureaus      | Filter by bureau code                              |
+| `region`         | All regions      | Filter by institution region                       |
+| `institution_id` | All institutions | Filter by institution ID                           |
+| `cluster_only`   | `false`          | Show cases assigned to a cluster only              |
+| `limit`          | `120`            | Maximum number of displayed cases; capped at `400` |
+
+The response retains the existing `nodes`, `edges`, `flagshipClusterId`,
+`totalCases`, `totalInstitutions`, and `totalOverlaps` fields.
+
+Additional metadata:
+
+- `shownCases`: number of cases included in the graph.
+- `truncated`: whether matching cases were omitted because of the limit.
+- `filterOptions`: available regions and institutions.
+
+When results are truncated, the frontend displays a notice encouraging users
+to narrow their search with filters. Rejected overlap pairs are excluded, and
+edges are emitted only when their endpoint nodes are present.
