@@ -165,7 +165,7 @@ def test_recorded_decisions_remain_unchanged_and_control_new_joint_work(room_dat
     assert db.one(conn, "SELECT status,decision FROM coordination_rooms WHERE id=?", (room["id"],)) == before
 
 
-def test_regional_reads_are_scoped_and_read_only(room_data, conn, client, as_role):
+def test_regional_reads_are_scoped_and_read_only(room_data, conn, client, as_role, corrupt_regional):
     room, a, _ = room_data
     item_id = add(conn, client, as_role, room, a["case_id"]).json()["id"]
     valid = client.get(url(room), headers=as_role("REGIONAL", "Western"))
@@ -173,8 +173,8 @@ def test_regional_reads_are_scoped_and_read_only(room_data, conn, client, as_rol
     payload = valid.json()
     assert payload["role"] == "REGIONAL" and payload["scope_region"] == "Western"
     assert payload["can_create"] is False and payload["items"][0]["can_complete"] is False
-    for region in ("", "Unknown", "Northern"):
-        response = client.get(url(room), headers=as_role("REGIONAL", region))
+    for headers in (corrupt_regional(""), corrupt_regional("Unknown"), as_role("REGIONAL", "Northern")):
+        response = client.get(url(room), headers=headers)
         assert response.status_code == 403 and a["case_id"] not in response.text
     denied = client.post(f"{url(room)}/{item_id}/complete", headers=as_role("REGIONAL", "Western"), json={"completion_note": "Done"})
     assert denied.status_code == 403
