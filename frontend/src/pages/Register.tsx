@@ -264,6 +264,11 @@ function SingleForm() {
                           <div className="mt-0.5 text-[11.5px] text-slate-500">
                             Similar in: {[...o.breakdown].sort((a: any, b: any) => b.points / b.max - a.points / a.max).slice(0, 2).map((b: any) => b.label.toLowerCase()).join(' and ')}
                           </div>
+                          {o.breakdown.filter((s: any) => s.signal === 'entities' && s.points > 0).map((s: any) => (
+                            <div key={s.signal} className="mt-2 break-words rounded-md bg-emerald-50 px-2 py-1.5 text-xs text-emerald-900">
+                              <div className="font-semibold">Shared details · +{s.points} match points</div>
+                              <div className="mt-0.5">{s.detail}</div>
+                            </div>))}
                         </div>
                       </li>))}
                   </ul>
