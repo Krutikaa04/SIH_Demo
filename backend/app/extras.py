@@ -7,10 +7,11 @@ from pathlib import Path
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import FileResponse, Response
 
-from . import db, events, nlsearch, reports, roles, services, unmatched
+from . import action_plans, db, events, nlsearch, reports, roles, services, unmatched
 from .roles import get_ctx
 
 router = APIRouter()
+router.include_router(action_plans.router)
 UPLOADS = db.ROOT / "data" / "uploads"
 MAX_BYTES = 2 * 1024 * 1024
 
